@@ -51,37 +51,91 @@ def expand_for_ts(X_train, X_test):
     X_test = np.array(X_test)[:, np.newaxis, :]
     return X_train, X_test
 
-def get_X_y(df, prefall=1, fall=1, postfall=5):
+def get_X_y(df, **kwargs):
+    default_kwargs = {'keep_fall': False, 'window_size': 60, 'fall_dur': 1, 'spacing': 1, 'fall_pos': 'fixed', 'multiphase': False, 'thresh': 1.1, 'step': 1}
+    kwargs = {**default_kwargs, **kwargs}
+    no_segmentation = kwargs['keep_fall'] and not kwargs['segment_test']
+    if kwargs['multiphase']:
+        prefalls = [kwargs['prefall']] if kwargs['prefall'] else [1]
+    else:
+        if kwargs['spacing'] == 'na':
+            prefalls = [kwargs['window_size']//2]
+        else:
+            n_fall_samples = kwargs['window_size']//kwargs['spacing']
+            if kwargs['fall_pos'] == "random":
+                # let the fall position be random, between 2 and kwargs['window_size']-2, but with a random seed
+                np.random.seed(5)
+                prefalls = np.random.randint(2, kwargs['window_size']-2, n_fall_samples)          
+            else:
+                prefalls = np.arange(2, kwargs['window_size']-2, kwargs['spacing'])
     X = []
     y = []
     for i, row in df.iterrows():
         fall_point = row['fall_point']
         freq = row['freq']
         accel = row['accel_mag']
-        # Take out the fall signal
-        before = int(fall_point-(freq*prefall))
-        after = int(fall_point+(freq*(fall+postfall)))
-        fall_signal = accel[before:after]
-        if freq==20:
-            # resample to 100 Hz
-            new_length = int(100*len(fall_signal)/20)
-            fall_signal = resample(fall_signal, new_length)
-        X.append(fall_signal)
-        y.append(1)
-        prefall_signal = accel[:before]
-        # Segment prefall signal
-        cw, targets = get_candidate_windows(
-            prefall_signal, freq=freq, target=0, prefall=prefall,
-            fall=fall, postfall=postfall, thresh=1.4)
-        # print('adl', len(cw), len(targets))
-        X.extend(cw)
-        y.extend(targets)
-    X = np.array(X)
-    y = np.array(y, dtype='uint8')
+        if kwargs['keep_fall']:
+            prefall_signal = accel
+        else:
+            # Take out the fall signal
+            for prefall in prefalls:
+                postfall = kwargs['window_size'] - prefall - kwargs['fall_dur']
+                start = int(fall_point-(freq*prefall))
+                end = int(start+(freq*kwargs['window_size']))
+                fall_signal = accel[start:end]
+                if freq==20:
+                    # resample to 100 Hz
+                    new_length = int(100*len(fall_signal)/20)
+                    fall_signal = resample(fall_signal, new_length)
+                X.append(fall_signal)
+                y.append(1)
+            # leave out the fall signal with a gap equal to the maximum prefall
+            gap = int(fall_point-(freq*max(prefalls)))
+            prefall_signal = accel[:gap]
+            fall_point = None
+        if no_segmentation:
+            X.append(prefall_signal)
+            y.append(fall_point)
+        else:
+            # Segment prefall signal if long enough
+            if len(prefall_signal) >= 2*freq*kwargs['window_size']:
+                cw, targets = get_adls(prefall_signal,freq,fall_point, **kwargs)
+                X.extend(cw)
+                y.extend(targets)
+    if not no_segmentation:
+        X = np.array(X)
+        y = np.array(y, dtype='uint8')
+    return X, y
+
+def get_adls(ts, freq, fall_point, **kwargs):
+    """
+    Get candidate windows for ADLs. Loop through ts with a step of 5 seconds. Select windows with max value >= thresh.
+    Any window where fall_point is within the window is labelled as a fall.
+    """
+    ts = np.array(ts).flatten()
+    X = []
+    y = []
+    sample_window_size = int(freq*kwargs['window_size'])
+    freq_100_length = int(100*(kwargs['window_size']))
+    # resample to match signals of 100Hz if necessary
+    resample_to_100Hz = freq_100_length != sample_window_size
+    for j in range(0, len(ts), freq*kwargs['step']):
+        potential_window = ts[j:j+sample_window_size]
+        if len(potential_window) < sample_window_size:
+            break
+        search_window = potential_window[freq:2*freq] if kwargs['multiphase'] else potential_window
+        if max(search_window) >= kwargs['thresh']:
+            if resample_to_100Hz:
+                potential_window = resample(potential_window, freq_100_length)
+            X.append(potential_window)
+            if fall_point in range(j, j+sample_window_size):
+                y.append(1)
+            else:
+                y.append(0)
     return X, y
 
 def get_candidate_windows(ts, freq, target, prefall,
-                fall, postfall, thresh=1.08, step=1):
+                fall, postfall, thresh=1.08, step=60):
     ts = np.array(ts).flatten()
     X = []
     y = []
@@ -95,7 +149,7 @@ def get_candidate_windows(ts, freq, target, prefall,
         potential_window = ts[j:j+sample_window_size]
         if len(potential_window) < required_length:
             break
-        main_window = potential_window[freq:2*freq]
+        main_window = potential_window[28*freq:29*freq]
         if len(main_window) == freq*step:
             if max(main_window) >= thresh:
                 selected_window = potential_window
@@ -104,30 +158,3 @@ def get_candidate_windows(ts, freq, target, prefall,
                 X.append(selected_window)
                 y.append(target)
     return X, y
-
-# uncomment this function to load farseeing into a dataframe
-# def load_in_df():
-#     cols = ['SubjectID', 'FallID', 'freq', 'accel', 'accel_mag', 'fall_point']
-#     df = pd.DataFrame(columns=cols)
-#     signal_files, _, meta = load_signal_files()
-#     df_dict = {}
-#     for sf in tqdm(signal_files):
-#         if sf == "F_00002186-05-2013-11-23-18-25-04.mat":
-#             continue
-#         fall_id = '-'.join(sf.split("_")[1].split("-")[:2])
-#         df_dict['FallID'] = fall_id
-#         row = meta[meta['Randomnumber']==fall_id]
-#         if row['Sensor_location'].item() != 'L5':
-#             continue
-#         df_dict['SubjectID'] = fall_id.split("-")[0]
-#         df_dict['freq'] = row['Sample_rate_Hz'].item()
-#         signal = mat73.loadmat(f'data/FARSEEING/signals/{sf}')
-#         accel = signal['tmp'][:,2:5]/9.8
-#         df_dict['accel'] = [list(accel)]
-#         accel_magnitude = magnitude(np.clip(accel, -2, 2))
-#         df_dict['accel_mag'] = [list(accel_magnitude)]
-#         fall_indicator = signal['tmp'][:,11]
-#         df_dict['fall_point'] = np.where(fall_indicator!=0)[0][0]
-#         this_df = pd.DataFrame(data=df_dict)
-#         df = pd.concat([df, this_df], ignore_index=True)
-#     return df

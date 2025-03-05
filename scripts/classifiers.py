@@ -1,4 +1,6 @@
 import copy
+from email.policy import default
+from pyexpat import model
 import timeit
 from tqdm.notebook import tqdm
 import numpy as np, pandas as pd
@@ -20,6 +22,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegressionCV
+from tabpfn import TabPFNClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
 
@@ -49,7 +52,7 @@ def explain_model(model, X, y, chunks, preprocess=True, normalise=True):
     exp = shap.explain(X, labels=y, n_segments=chunks, normalise=normalise)
     return exp
 
-def get_models(type=None, models_subset=None):
+def get_models(**kwargs):
     all_models = {
         'tabular': {
             'LogisticCV': LogisticRegressionCV(cv=5, n_jobs=-1, solver='newton-cg'),
@@ -58,7 +61,8 @@ def get_models(type=None, models_subset=None):
             'RidgeCV': RidgeClassifierCV(alphas=np.logspace(-3, 3, 10)),
             'ExtraTrees': ExtraTreesClassifier(n_estimators=150, max_features=0.1,
                                             criterion="entropy", n_jobs=-1,
-                                            random_state =0)
+                                            random_state =0),
+            'TabPFN': TabPFNClassifier()
         },
         'ts': {
             'Hydra': HydraClassifier(random_state=0, n_jobs=-1),
@@ -69,21 +73,27 @@ def get_models(type=None, models_subset=None):
         }
     }
 
-    if type is None: # run all models
+    default_kwargs = {'model_type': None, 'models_subset': None}
+    kwargs = {**default_kwargs, **kwargs}
+
+    if kwargs['model_type'] is None: # run all models
         models = {**all_models['tabular'], **all_models['ts']}
     else: # the saner choice :-)
-        models = all_models[type]
-    if models_subset is not None: # select model subset
-        models = {m: models[m] for m in models_subset}
+        models = all_models[kwargs['model_type']]
+    if kwargs['models_subset'] is not None: # select model subset
+        models = {m: models[m] for m in kwargs['models_subset']}
     
     return models
 
 
-def run_models(X_train, y_train, X_test, y_test, freq, s=7, type=None, subset=None, verbose=1, cm_grid=(1,5), confmat_name='confmat'):
+def run_models(X_train, y_train, X_test, y_test, **kwargs):
+    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat'}
+    kwargs = {**default_kwargs, **kwargs}
     trained_models = {}
-    models = get_models(type=type, models_subset=subset)
+    models = get_models(**kwargs)
     metrics_df = pd.DataFrame(columns=['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score'])
-    if verbose > 2:
+    if kwargs['verbose'] > 2:
+        cm_grid = kwargs['cm_grid']
         fig, axs = plt.subplots(*cm_grid, figsize=(10,3), sharey=True)
         fig.supxlabel('Predicted label')
     for m, (model_name, clf) in enumerate(models.items()):
@@ -94,9 +104,9 @@ def run_models(X_train, y_train, X_test, y_test, freq, s=7, type=None, subset=No
         )
         # preprocess = model_name in ['LogisticCV', 'RandomForest', 'KNN', 'RidgeCV', 'ExtraTrees']
         metrics, trained_model, cm = predict_eval(
-            (model_name, clf), s, freq, X_in=(X_train, X_test),
-            y_in=(y_train, y_test), verbose=verbose)
-        if verbose > 2:
+            (model_name, clf), X_in=(X_train, X_test),
+            y_in=(y_train, y_test), **kwargs)
+        if kwargs['verbose'] > 2:
             ax = axs.flat[m]
             plot_cm(cm, ax=ax, model_name=model_name)
             ax.set_title(model_name)
@@ -106,8 +116,8 @@ def run_models(X_train, y_train, X_test, y_test, freq, s=7, type=None, subset=No
         these_metrics = pd.DataFrame(data=metrics)
         metrics_df = pd.concat([metrics_df, these_metrics], ignore_index=True)
         trained_models[model_name]=trained_model
-    if verbose > 2:
-        plt.savefig(f'figs/{confmat_name}.eps', format='eps', bbox_inches='tight')
+    if kwargs['verbose'] > 2:
+        plt.savefig(f"figs/{kwargs['confmat_name']}.eps", format='eps', bbox_inches='tight')
         plt.show()
 
     return metrics_df, trained_models
@@ -134,23 +144,25 @@ def to_labels(pos_probs, threshold):
     # apply threshold to positive probabilities to create labels
     return (pos_probs >= threshold).astype('int')
 
-def predict_eval(model, s, freq, X_in=None, y_in=None, starttime=None, adapt_threshold=False, verbose=1):
-    win_size = int(s*freq)
+def window_from_midpoint(X, win_size):
+    h = win_size//2
+    mid = X.shape[1]//2
+    return X[:, mid-h:mid+h]
+
+def predict_eval(model, X_in=None, y_in=None, starttime=None, **kwargs):
     target_names = ['ADL', 'Fall']
     model_name, clf = model
     print(f'{model_name}', end='')
-    # if preprocess:
-    #     clf = make_pipeline(
-    #         StandardScaler(),
-    #         SimpleImputer(missing_values=np.nan, strategy='mean'),
-    #         clf
-    #     )
     has_proba = hasattr(clf, 'predict_proba')
     if X_in is not None:
         X_train, X_test = X_in
         y_train, y_test = y_in
-    X_train = X_train[:, :win_size]
-    X_test = X_test[:, :win_size]
+    # X_train = X_train[:, :win_size]
+    # X_test = X_test[:, :win_size]
+    # select half of win_size around the middle X_train and X_test
+    # X_train = window_from_midpoint(X_train, win_size)
+    # X_test = window_from_midpoint(X_test, win_size)
+
     print('.', end='')
     clf.fit(X_train, y_train)
     print('.', end='')
@@ -169,14 +181,14 @@ def predict_eval(model, s, freq, X_in=None, y_in=None, starttime=None, adapt_thr
     runtime = np.round(runtime * 1000000) # microseconds (ms)
     print('.', end=' ')
     precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average='binary', zero_division=1)
-    if verbose > 1:
+    if kwargs['verbose'] > 1:
         print(f'{model_name} AUC: {auc_score}')
         print(classification_report(y_test, y_pred, target_names=target_names))
     cm = confusion_matrix(y_test, y_pred)
     tn, fp, fn, tp = cm.ravel()
     specificity = tn / (tn+fp)
     return dict({'model': [model_name],
-                 'window_size': s,
+                 'window_size': kwargs['window_size'],
                  'runtime':[np.round(runtime, 2)],
                  'auc': [np.round(auc_score*100, 2)],
                  'precision':[np.round(precision*100, 2)],
@@ -210,16 +222,23 @@ def get_dataset_name(dataset):
     }
     return names[dataset]
 
-def cross_validate(dataset, model_type=None, models_subset=None,
-                   s=7, cv=5, df=None, verbose=True, random_state=9):
+def cross_validate(dataset, **kwargs):
+    default_kwargs = {'model_type': None, 'models_subset': None,
+                      'window_size': 60, 'cv': 5, 'loaded_df': None,
+                      'verbose': True, 'random_state': 9, 'spacing': 1,
+                      'fall_pos': 'fixed', 'multiphase': False,
+                      'thresh': 1.1, 'step': 1, 'segment_test': True}
+    kwargs = {**default_kwargs, **kwargs}
     dataset_name = get_dataset_name(dataset)
-    if df is None:
+    if kwargs['loaded_df'] is None:
         df = dataset.load()
-    rng = np.random.default_rng(random_state)
+    else:
+        df = kwargs['loaded_df']
+    rng = np.random.default_rng(kwargs['random_state'])
     subjects = list(df['SubjectID'].unique())
     rng.shuffle(subjects)
     # divide subjects into cv sets
-    test_sets = list(chunk_list(subjects, cv))
+    test_sets = list(chunk_list(subjects, kwargs['cv']))
     freq = get_freq(dataset)
     metrics_df = None
     for i, test_set in enumerate(test_sets):
@@ -230,21 +249,19 @@ def cross_validate(dataset, model_type=None, models_subset=None,
             test_df = pd.concat([test_df, this_df], ignore_index=True)
             train_df.drop(this_df.index, inplace=True)
             train_df.reset_index().drop(columns=['index'], inplace=True)
-        X_train, y_train = dataset.get_X_y(train_df)
-        X_test, y_test = dataset.get_X_y(test_df)
-        if verbose:
+        X_train, y_train = dataset.get_X_y(train_df, **kwargs)
+        X_test, y_test = dataset.get_X_y(test_df, keep_fall=True, **kwargs)
+        if kwargs['verbose']:
             print(f'\n\n-- fold {i+1} ({len(test_set)} subjects) --')
             print(f"Train set: X: {X_train.shape}, y: {y_train.shape}\
             ([ADLs, Falls])", np.bincount(y_train))
             print(f"Test set: X: {X_test.shape}, y: {y_test.shape}\
             ([ADLs, Falls])", np.bincount(y_test))
         if metrics_df is None:
-            metrics_df, _ = run_models(X_train, y_train, X_test, y_test, type=model_type,
-                                       freq=freq, s=s, subset=models_subset)
+            metrics_df, _ = run_models(X_train, y_train, X_test, y_test, freq=freq, **kwargs)
             metrics_df['fold'] = i
         else:
-            this_df, _ = run_models(X_train, y_train, X_test, y_test, type=model_type,
-                                    freq=freq, s=s, subset=models_subset)
+            this_df, _ = run_models(X_train, y_train, X_test, y_test, freq=freq, **kwargs)
             this_df['fold'] = i
             metrics_df = pd.concat([metrics_df, this_df], ignore_index=True)
     mean_df = metrics_df.groupby(['model']).mean().round(2)
@@ -258,7 +275,7 @@ def cross_validate(dataset, model_type=None, models_subset=None,
     aggr_df = pd.DataFrame(data=aggr)
     aggr_df['Dataset'] = dataset_name
     metrics_df['Dataset'] = dataset_name
-    aggr_df.to_csv(f'results/{dataset_name}_{model_type}_{s}.csv')
+    # aggr_df.to_csv(f'results/{dataset_name}_{model_type}_{s}.csv')
     return metrics_df, aggr_df
 
 def boxplot(df, dataset, model_type, metric='f1-score', save=False, **kwargs):
@@ -326,29 +343,6 @@ def cross_dataset_eval(simulated, real):
 
     return pd.concat(summary, ignore_index=True)
 
-
-# def cross_dataset_eval(d1, d2, test_d):
-#     # resample to the lower frequency
-#     new_freq = min(get_freq(d1), get_freq(d2))
-#     X_train_d1, _, y_train_d1, _ = utils.train_test_subjects_split(d1, clip=d1!=farseeing, new_freq=new_freq)
-    
-#     X_train_d2, X_test, y_train_d2, y_test = utils.train_test_subjects_split(d2, clip=d2!=farseeing, new_freq=new_freq, show_test=True)
-
-#     print(f'\n<----- {get_dataset_name(d1)} > {get_dataset_name(d2)} ----->')
-#     d1d2_df, _ = run_models(X_train_d1, y_train_d1, X_test, y_test, freq=new_freq, type='ts')
-#     d1d2_df['trainset'] = f'{get_dataset_name(d1)}'
-
-#     # Mix all and train_test_split
-#     X_train = np.concatenate([X_train_d1, X_train_d2], axis=0)
-#     y_train = np.concatenate([y_train_d1, y_train_d2], axis=0)
-
-#     print(f'\n\n<----- {get_dataset_name(d1)} + {get_dataset_name(d2)} ----->')
-#     mixed_df, _ = run_models(X_train, y_train, X_test, y_test, freq=new_freq, type='ts')
-#     mixed_df['trainset'] = f'{get_dataset_name(d1)}+{get_dataset_name(d2)}'
-
-#     return pd.concat([d1d2_df, mixed_df], ignore_index=True)
-
-
 def get_sample_attributions(clf, X_test, y_test, c=28, normalise=True, n=2):
     y_pred = clf.predict(X_test)
     true_falls = np.logical_and(y_test==1, y_pred==1)
@@ -378,42 +372,6 @@ def get_sample_attributions(clf, X_test, y_test, c=28, normalise=True, n=2):
 def scale_arr(arr):
     scaler = MinMaxScaler(feature_range=(-1,1))
     return scaler.fit_transform(arr.reshape(-1,1)).flatten()
-
-# def plot_sample_with_attributions(attr_dict):
-#     titles = ['True Falls', 'False Alarms', 'True ADLs', 'Misses']
-#     fig, axs = plt.subplots(5, 4, figsize=(10, 10), dpi=400,
-#                             sharey='row', sharex='col', layout='constrained')
-#     plt.rcParams.update({'font.size': 10})
-#     cmap = plt.get_cmap('coolwarm')
-#     attributions = copy.deepcopy(attr_dict)
-#     for i, (model_name, exps) in enumerate(attributions.items()):
-#         axs[i,0].set_ylabel(model_name)
-#         for e, exp in enumerate(exps):
-#             ax = axs[i,e]
-#             if i==0:
-#                 ax.set_title(titles[e])
-#             y = scale_arr(exp['sample'])
-#             x = np.arange(len(y))
-#             c = exp['attr'].flatten()
-#             ax.plot(c, linestyle=':', label='attribution profile', alpha=0.3)
-#             # Normalize the color values
-#             norm = mcolors.Normalize(vmin=-1, vmax=1)
-#             for j in range(len(x)-1):
-#                 ax.plot(x[j:j+2], y[j:j+2], color=cmap(norm(c[j])), linewidth=1.5, label='normalised sample' if j==0 else None)
-#             ticks_loc = ax.get_xticks().tolist()
-#             ax.xaxis.set_major_locator(mticker.FixedLocator(ticks_loc))
-#             ax.set_xticklabels([i//100 for i in ticks_loc])
-#             # ax.grid(which='both', axis='x')     
-#     axs[1,3].legend()
-#     fig.supylabel('Attribution score')
-#     # Adding color bar to show the color scale
-#     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-#     sm.set_array([])
-#     cax = plt.axes((1.01, 0.05, 0.015, 0.92))
-#     plt.colorbar(sm, cax=cax)
-#     fig.supxlabel('Time in seconds')
-#     plt.savefig('figs/model_explanation.pdf', bbox_inches='tight')
-#     plt.show()
 
 def plot_sample_with_attributions(attr_dict):
     titles = ['True Fall', 'False Alarm', 'True ADL', 'Missed Fall']
@@ -450,3 +408,20 @@ def plot_sample_with_attributions(attr_dict):
         # sns.despine()
         plt.savefig(f'figs/{model_name}_explanation.pdf', bbox_inches='tight')
         plt.show()
+
+
+def train_models(dataset, **kwargs):
+    X_train, X_test, y_train, y_test = dataset
+    models = get_models(model_type='ts')
+    trained_models = {}
+    for model_name, clf in models.items():
+        clf = make_pipeline(
+            StandardScaler(),
+            SimpleImputer(missing_values=np.nan, strategy='mean'),
+            clf
+        )
+        print(f'Training {model_name}... ', end=' ')
+        clf.fit(X_train, y_train)
+        print('✅', end='. ')
+        trained_models[model_name] = clf
+    return trained_models
