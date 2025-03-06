@@ -1,8 +1,5 @@
 import copy
-from email.policy import default
-from pyexpat import model
 import timeit
-from tqdm.notebook import tqdm
 import numpy as np, pandas as pd
 from scipy.signal import resample
 from scipy.signal import savgol_filter
@@ -11,10 +8,10 @@ import matplotlib.colors as mcolors
 sns.set_style("ticks")
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
-from scripts import farseeing, fallalld, sisfall, utils
+from scripts import farseeing, utils
 from scripts.utils import get_freq
+from sklearn.model_selection import KFold
 
-from matplotlib.patches import Rectangle
 import matplotlib.ticker as mticker
 
 from sklearn.linear_model import RidgeClassifierCV
@@ -27,7 +24,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
 
 from sklearn.metrics import roc_auc_score, roc_curve, auc
-from sklearn.metrics import precision_recall_fscore_support, f1_score
+from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import StandardScaler
@@ -40,17 +37,6 @@ from aeon.classification.interval_based import QUANTClassifier
 from aeon.classification.convolution_based import RocketClassifier, HydraClassifier
 from aeon.classification.convolution_based import MultiRocketHydraClassifier
 
-from scripts.TsCaptum.explainers import Shapley_Value_Sampling as SHAP
-
-def explain_model(model, X, y, chunks, preprocess=True, normalise=True):
-    X = X[:, np.newaxis, :]
-    if X.shape[0]==1:
-        print("Found 1 sample. Doubling it to avoid errors")
-        X = np.vstack([X, X])
-        y = np.vstack([y, y]).flatten()
-    shap = SHAP(model)
-    exp = shap.explain(X, labels=y, n_segments=chunks, normalise=normalise)
-    return exp
 
 def get_models(**kwargs):
     all_models = {
@@ -85,42 +71,50 @@ def get_models(**kwargs):
     
     return models
 
-
-def run_models(X_train, y_train, X_test, y_test, **kwargs):
-    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat'}
-    kwargs = {**default_kwargs, **kwargs}
-    trained_models = {}
+def train_models(X_train, y_train, **kwargs):
     models = get_models(**kwargs)
-    metrics_df = pd.DataFrame(columns=['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score'])
-    if kwargs['verbose'] > 2:
-        cm_grid = kwargs['cm_grid']
-        fig, axs = plt.subplots(*cm_grid, figsize=(10,3), sharey=True)
-        fig.supxlabel('Predicted label')
-    for m, (model_name, clf) in enumerate(models.items()):
+    trained_models = {}
+    print(f'Training', end=' ')
+    for model_name, clf in models.items():
         clf = make_pipeline(
             StandardScaler(),
             SimpleImputer(missing_values=np.nan, strategy='mean'),
             clf
         )
-        # preprocess = model_name in ['LogisticCV', 'RandomForest', 'KNN', 'RidgeCV', 'ExtraTrees']
-        metrics, trained_model, cm = predict_eval(
-            (model_name, clf), X_in=(X_train, X_test),
-            y_in=(y_train, y_test), **kwargs)
-        if kwargs['verbose'] > 2:
-            ax = axs.flat[m]
-            plot_cm(cm, ax=ax, model_name=model_name)
-            ax.set_title(model_name)
-            ax.set_xlabel('')
-            if m>0:
-                ax.set_ylabel('')
-        these_metrics = pd.DataFrame(data=metrics)
-        metrics_df = pd.concat([metrics_df, these_metrics], ignore_index=True)
-        trained_models[model_name]=trained_model
-    if kwargs['verbose'] > 2:
-        plt.savefig(f"figs/{kwargs['confmat_name']}.eps", format='eps', bbox_inches='tight')
-        plt.show()
+        print(f'{model_name}', end=' ')
+        clf.fit(X_train, y_train)
+        print('✅', end=' ')
+        trained_models[model_name] = clf
+    return trained_models
 
-    return metrics_df, trained_models
+def run_models(X_train, y_train, X_test, y_test, **kwargs):
+    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat'}
+    kwargs = {**default_kwargs, **kwargs}
+    trained_models = train_models(X_train, y_train, **kwargs)
+    metrics_df = pd.DataFrame(columns=['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score'])
+    if kwargs['verbose'] > 2:
+        cm_grid = kwargs['cm_grid']
+        fig, axs = plt.subplots(*cm_grid, figsize=(10,3), sharey=True)
+        fig.supxlabel('Predicted label')
+    metrics_df = pd.DataFrame(columns=['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score', 'false alarm rate', 'miss rate'])
+    # get metrics for each trained model
+    for m, (model_name, trained_model) in enumerate(trained_models.items()):
+        signal_time = 0
+        TP, FP, TN, FN = 0, 0, 0, 0
+        for ts, y in zip(X_test, y_test):
+            if len(ts) < 120000:
+                continue
+            signal_time += len(ts)
+            tp, fp, tn, fn, ave_time = utils.test_stream(ts, y, model=trained_model)
+            TP += tp
+            FP += fp
+            TN += tn
+            FN += fn
+        auc, precision, recall, specificity, f1, far, mr = utils.get_metrics(TP, FP, TN, FN, signal_time, window_size=kwargs['window_size'])
+        metrics = {'model': [model_name], 'window_size': [kwargs['window_size']],'runtime': [ave_time], 'auc': [auc], 'precision': [precision], 'recall': [recall], 'specificity': [specificity], 'f1-score': [f1], 'false alarm rate': [far], 'miss rate': [mr]}
+        row = pd.DataFrame(data=metrics)
+        metrics_df = pd.concat([metrics_df, row], ignore_index=True)
+    return metrics_df
 
 def plot_metrics(df, x='model', pivot='f1-score', compare='metrics', **kwargs):
     default_kwargs = {'figsize': (6,2), 'rot': 0}
@@ -217,17 +211,15 @@ def chunk_list(l, n):
 def get_dataset_name(dataset):
     names = {
         farseeing: 'FARSEEING',
-        fallalld: 'FallAllD',
-        sisfall: 'SisFall'
+        # fallalld: 'FallAllD',
+        # sisfall: 'SisFall'
     }
     return names[dataset]
 
 def cross_validate(dataset, **kwargs):
     default_kwargs = {'model_type': None, 'models_subset': None,
-                      'window_size': 60, 'cv': 5, 'loaded_df': None,
-                      'verbose': True, 'random_state': 9, 'spacing': 1,
-                      'fall_pos': 'fixed', 'multiphase': False,
-                      'thresh': 1.1, 'step': 1, 'segment_test': True}
+                      'window_size': 40, 'cv': 5, 'loaded_df': None,
+                      'verbose': True, 'random_state': 9, 'spacing': 5,'multiphase': False, 'thresh': 1.1, 'step': 5, 'segment_test': False}
     kwargs = {**default_kwargs, **kwargs}
     dataset_name = get_dataset_name(dataset)
     if kwargs['loaded_df'] is None:
@@ -252,21 +244,20 @@ def cross_validate(dataset, **kwargs):
         X_train, y_train = dataset.get_X_y(train_df, **kwargs)
         X_test, y_test = dataset.get_X_y(test_df, keep_fall=True, **kwargs)
         if kwargs['verbose']:
-            print(f'\n\n-- fold {i+1} ({len(test_set)} subjects) --')
+            print(f'\n\n-- fold {i+1}, testing on ({len(test_set)} subjects) --')
             print(f"Train set: X: {X_train.shape}, y: {y_train.shape}\
             ([ADLs, Falls])", np.bincount(y_train))
-            print(f"Test set: X: {X_test.shape}, y: {y_test.shape}\
-            ([ADLs, Falls])", np.bincount(y_test))
+            print(f"Test set: X: {len(X_test)}, y: {len(y_test)}")
         if metrics_df is None:
-            metrics_df, _ = run_models(X_train, y_train, X_test, y_test, freq=freq, **kwargs)
+            metrics_df = run_models(X_train, y_train, X_test, y_test, freq=freq, **kwargs)
             metrics_df['fold'] = i
         else:
-            this_df, _ = run_models(X_train, y_train, X_test, y_test, freq=freq, **kwargs)
+            this_df = run_models(X_train, y_train, X_test, y_test, freq=freq, **kwargs)
             this_df['fold'] = i
             metrics_df = pd.concat([metrics_df, this_df], ignore_index=True)
     mean_df = metrics_df.groupby(['model']).mean().round(2)
     std_df = metrics_df.groupby(['model']).std().round(2)
-    cols = ['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score']
+    cols = ['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score', 'false alarm rate', 'miss rate']
     aggr = {c: [] for c in cols}
     for i in mean_df.index:
         aggr['model'].append(i)
@@ -408,20 +399,3 @@ def plot_sample_with_attributions(attr_dict):
         # sns.despine()
         plt.savefig(f'figs/{model_name}_explanation.pdf', bbox_inches='tight')
         plt.show()
-
-
-def train_models(dataset, **kwargs):
-    X_train, X_test, y_train, y_test = dataset
-    models = get_models(model_type='ts')
-    trained_models = {}
-    for model_name, clf in models.items():
-        clf = make_pipeline(
-            StandardScaler(),
-            SimpleImputer(missing_values=np.nan, strategy='mean'),
-            clf
-        )
-        print(f'Training {model_name}... ', end=' ')
-        clf.fit(X_train, y_train)
-        print('✅', end='. ')
-        trained_models[model_name] = clf
-    return trained_models

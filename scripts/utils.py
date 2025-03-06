@@ -1,11 +1,6 @@
-# import pywt
-from cProfile import label
 from curses import window
-from re import sub
-from tracemalloc import stop
 import numpy as np
 import pandas as pd
-from math import isnan, sqrt
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
@@ -17,21 +12,12 @@ from scipy.signal import resample
 from sklearn.metrics import f1_score
 import time, timeit
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import roc_auc_score
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
 from sklearn.metrics import ConfusionMatrixDisplay
+from scripts import farseeing
 
-from sklearn.preprocessing import scale
-import test
-from torch import layout
-from torch.utils import data
-from scripts import farseeing, fallalld, sisfall
-
-
-# apply threshold to positive probabilities to create labels
-def to_labels(pos_probs, threshold):
-    return (pos_probs >= threshold).astype('int')
 
 def predict_eval(model, X_in=None, y_in=None, starttime=None, adapt_threshold=False):
     target_names = ['ADL', 'Fall']
@@ -232,11 +218,10 @@ def single_subject_split(dataset, **kwargs):
     return subject_splits
 
 def train_test_subjects_split(dataset, **kwargs):
-    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'visualize': False, 'clip': False, 'new_freq': None, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None}
+    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'visualize': False, 'clip': False, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None}
     kwargs = {**default_kwargs, **kwargs}
     df = dataset.load(clip=kwargs['clip'])
     subjects = df['SubjectID'].unique()
-    resample = kwargs['new_freq'] is not None and kwargs['new_freq']!=get_freq(dataset)
     if kwargs['split']==False:
         X, y = dataset.get_X_y(df, **kwargs)
         if resample:
@@ -367,33 +352,31 @@ def plot_window_size_ablation(window_metrics=None):
     plt.savefig('figs/window_size_ablation.pdf', bbox_inches='tight')
     plt.show()
 
-def get_confidence(ts, model):
-	"""Generate confidence scores for each model.
-	Over the whole signal using vectorization
-	"""
-	num_samples = len(ts)
-	chunk_size = 4000
+# def get_confidence(ts, model):
+# 	"""Generate confidence scores for each model.
+# 	Over the whole signal using vectorization
+# 	"""
+# 	num_samples = len(ts)
+# 	chunk_size = 4000
 
-	# Ensure num_samples is a multiple of chunk_size
-	# pad with zeros if necessary
-	if num_samples % chunk_size != 0:
-		pad = chunk_size - num_samples % chunk_size
-		padded_ts = np.pad(ts, (0, pad), 'constant')
-	else:
-		padded_ts = ts
+# 	# Ensure num_samples is a multiple of chunk_size
+# 	# pad with zeros if necessary
+# 	if num_samples % chunk_size != 0:
+# 		pad = chunk_size - num_samples % chunk_size
+# 		padded_ts = np.pad(ts, (0, pad), 'constant')
+# 	else:
+# 		padded_ts = ts
 
-	num_chunks = len(padded_ts) // chunk_size
-	padded_ts = padded_ts.reshape(num_chunks, chunk_size)
-	c = model.predict_proba(padded_ts)[:, 1]
-	expanded_c = np.repeat(c, chunk_size)
-	expanded_c = expanded_c[:num_samples]
-	return expanded_c
+# 	num_chunks = len(padded_ts) // chunk_size
+# 	padded_ts = padded_ts.reshape(num_chunks, chunk_size)
+# 	c = model.predict_proba(padded_ts)[:, 1]
+# 	expanded_c = np.repeat(c, chunk_size)
+# 	expanded_c = expanded_c[:num_samples]
+# 	return expanded_c
 
-def plot_confidence(ts, y, c=None, model=None, title=None, label=None, predict=False):
-    """Plot the confidence scores"""
-    if c is None and model is not None:
-        c, total_time = sliding_window_confidence(ts, model, pad=True)
-        # c = get_confidence(ts, model)
+def plot_confidence(ts, c, y, tp, fp, tn, fn, **kwargs):
+    default_kwargs = {'high_conf': None, 'title': None}
+    kwargs = {**default_kwargs, **kwargs}
     x = np.arange(len(c))
     c[-8000:] = 0
     c[:100] = 0
@@ -422,70 +405,104 @@ def plot_confidence(ts, y, c=None, model=None, title=None, label=None, predict=F
     cbar = plt.colorbar(sm, ax=ax, fraction=0.03, pad=0.08)
     cbar.set_label('Confidence')
 
-    # Highlight high confidence regions
-    high_conf = get_high_confidence_regions(c, predict=predict)
-    for i in range(len(high_conf)):
-        ax.axvspan(high_conf[i], high_conf[i] + 4000, color='gray', alpha=0.3)
-
-    TP, FP, TN, FN = 0, 0, 0, 0
-    tp, fp, tn, fn = evaluate_detection(c, high_conf, y)
-    # Highlight falls, at index y
+    if kwargs['high_conf'] is not None:
+        high_conf = kwargs['high_conf']
+        for i in range(len(high_conf)):
+            ax.axvspan(high_conf[i], high_conf[i] + 4000, color='gray', alpha=0.3)
+    
     ax.axvline(x=y, color='red', linestyle='--', label='Fall')
     ax.legend()
-    if title is not None:
-        ax.set_title(f'Subject {title} | TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}. Time/sample: {total_time:.2f} ms')
+    if kwargs['title'] is not None:
+        title = kwargs['title']
+        ax.set_title(f'Subject {title} | TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}. Time/sample: {kwargs["ave_time"]:.2f} ms. {kwargs["model_name"]}')
     else:
-        ax.set_title(f'TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}. Time/sample: {total_time:.2f} ms')
+        ax.set_title(f'TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}. Time/sample: {kwargs["ave_time"]:.2f} ms. {kwargs["model_name"]}')
     plt.show()
-    return tp, fp, tn, fn
 
-def get_high_confidence_regions(c, predict, thresh=0.4):
+def test_stream(ts, y, model, **kwargs):
+    default_kwargs = {'predict': False, 'title': None, 'label': None, 'model': None, 'model_name': '', 'window_size': 4000, 'plot': False, 'plot_errors': True, 'signal_thresh': 1.4, 'confidence_thresh': 0.5} 
+    kwargs = {**default_kwargs, **kwargs}
+    ts = np.array(ts)
+    c, ave_time = sliding_window_confidence(ts, model, pad=True)
+
+    # Get high confidence regions
+    high_conf = get_high_confidence_regions(ts, c, **kwargs)
+    n_samples = len(ts)//kwargs['window_size']
+    tp, fp, tn, fn = evaluate_detection(n_samples, c, high_conf, y)
+    
+    if kwargs['plot']:
+        plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=high_conf, ave_time=ave_time, **kwargs)
+
+    if kwargs['plot_errors'] and (fp >= 1 or fn >= 1):
+        plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=high_conf, ave_time=ave_time, **kwargs)
+    
+    return tp, fp, tn, fn, ave_time
+
+def get_high_confidence_regions(ts, c, **kwargs):
     """Get high confidence regions based on threshold."""
-    if predict:
-        high_conf = np.where((c > thresh) | (c>=max(c)))[0]
-    else:
-        high_conf = np.where((c > thresh) & (c>=max(c)))[0]
+
+    # Combine signal threshold and confidence threshold
+    # high_conf = np.where((c > thresh) & (c>=max(c)))[0]
+    high_conf_idx = np.where(c > kwargs['confidence_thresh'])[0]
+    signal_points_above_thresh = np.where(ts > kwargs['signal_thresh'])[0]
+    high_conf = np.intersect1d(high_conf_idx, signal_points_above_thresh, assume_unique=True)
+    if len(high_conf) == 0:
+        return None
     high_conf_diff = np.diff(high_conf, prepend=0)
     first_point = high_conf[0]
-    the_rest = high_conf[1:][high_conf_diff[1:] > 1]
+    # Remove points that are within a minute of each other
+    the_rest = high_conf[1:][high_conf_diff[1:] >= 6000]
     if len(the_rest) == 0:
         high_conf = np.array([first_point])
     else:
         high_conf = np.array([first_point, *the_rest])
-    return high_conf
+    # Final check on high confidence points
+    high_conf = [h for h in high_conf if c[h] >= max(c[:h])]
+    return high_conf if len(high_conf) > 0 else None
 
-def evaluate_detection(c, high_conf, fall_point, window_size=4000, tolerance=2000):
+def evaluate_detection(n_samples, c, high_conf, fall_point, window_size=4000, tolerance=2000):
     """Evaluate TP, FP, TN, and FN based on confidence mapping."""
     TP, FP, TN, FN = 0, 0, 0, 0
-    n_samples = len(c)//window_size
     fall_range = range(fall_point - window_size - tolerance,
                        fall_point + window_size + tolerance)
     before_fall = range(0, fall_point - window_size - tolerance)
     after_fall = range(fall_point + window_size + tolerance, len(c))
-    if any([h in fall_range for h in high_conf]):
-        TP = 1
+    if high_conf is None:
+        TP, FP, TN, FN = 0, 0, n_samples-1, 1
     else:
-        FN = 1
-    for h in high_conf:
-        if h in before_fall or h in after_fall:
-            FP += 1
-    TN = n_samples - TP - FP - FN
+        if any([h in fall_range for h in high_conf]):
+            TP = 1
+        else:
+            FN = 1
+        for h in high_conf:
+            if h in before_fall or h in after_fall:
+                FP += 1
+        TN = n_samples - TP - FP - FN
     return TP, FP, TN, FN
 
-def get_metrics(tp, fp, tn, fn, signal_time):
-    print(f'TP: {tp}, TN: {tn}, FP: {fp}, FN: {fn}')
-    accuracy = (tp+tn)/(tp+tn+fp+fn)
-    precision = tp/(tp+fp)
-    recall = tp/(tp+fn)
-    f1 = 2*(precision*recall)/(precision+recall)
-    # How many hours from signal time
-    hours = signal_time/360000
-    # false alarm rate
-    far = fp/hours
-    # miss rate
-    mr = fn/hours
-    print(f'Accuracy: {accuracy:.2f}\nPrecision: {precision:.2f}\nRecall: {recall:.2f}\nF1: {f1:.2f}\nFalse alarm rate: {far:.2f} per hour\nMiss rate: {mr:.2f} per hour')
-    return accuracy, precision, recall, f1, far, mr
+def get_metrics(tp, fp, tn, fn, signal_time, window_size=4000):
+    """Compute metrics based on TP, FP, TN, FN, and signal time."""   
+    # Compute metrics
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    # Compute AUC-ROC estimate
+    fpr = 1 - specificity
+    fnr = 1 - recall
+    auc = (recall + (1 - fpr)) / 2
+
+    total_pos_samples = tp + fn
+    total_neg_samples = tn + fp
+    hours = signal_time / 360000
+
+    # False alarm rate per hour
+    far = (fpr * total_neg_samples) / hours if hours > 0 else 0
+    # Miss rate per hour
+    mr = (fnr * total_pos_samples) / hours if hours > 0 else 0
+
+    return auc, precision, recall, specificity, f1, far, mr
+
 
 def sliding_window_confidence(ts, model, window_size=4000, step=100, pad=True, method='max'):
     """
