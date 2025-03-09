@@ -1,0 +1,3 @@
+,model,window_size,runtime,auc,precision,recall,specificity,f1-score,false alarm rate,miss rate,Dataset
+0,Ensemble,28.0 ± 0.0,0.71 ± 0.1,0.83 ± 0.13,0.76 ± 0.08,0.66 ± 0.26,1.0 ± 0.0,0.68 ± 0.22,0.6 ± 0.31,1.03 ± 0.79,FARSEEING
+1,ExtraTrees,28.0 ± 0.0,0.71 ± 0.1,0.83 ± 0.13,0.76 ± 0.08,0.66 ± 0.26,1.0 ± 0.0,0.68 ± 0.22,0.6 ± 0.31,1.03 ± 0.79,FARSEEING

@@ -1,10 +1,14 @@
 import copy
+from re import sub
 import timeit
+from turtle import mode
 import numpy as np, pandas as pd
 from scipy.signal import resample
 from scipy.signal import savgol_filter
 import matplotlib.pyplot as plt, seaborn as sns
 import matplotlib.colors as mcolors
+from sympy import plot
+import test
 sns.set_style("ticks")
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -19,7 +23,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegressionCV
-from tabpfn import TabPFNClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
 
@@ -41,21 +44,16 @@ from aeon.classification.convolution_based import MultiRocketHydraClassifier
 def get_models(**kwargs):
     all_models = {
         'tabular': {
-            'LogisticCV': LogisticRegressionCV(cv=5, n_jobs=-1, solver='newton-cg'),
-            'RandomForest': RandomForestClassifier(n_estimators=150, random_state=0),
-            'KNN': KNeighborsClassifier(),
-            'RidgeCV': RidgeClassifierCV(alphas=np.logspace(-3, 3, 10)),
-            'ExtraTrees': ExtraTreesClassifier(n_estimators=150, max_features=0.1,
-                                            criterion="entropy", n_jobs=-1,
-                                            random_state =0),
-            'TabPFN': TabPFNClassifier()
+            # 'LogisticCV': LogisticRegressionCV(cv=5, n_jobs=-1, solver='newton-cg'),
+            # 'RandomForest': RandomForestClassifier(n_estimators=150, random_state=0),
+            # 'KNN': KNeighborsClassifier(),
+            'ExtraTrees': ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state =0),
         },
         'ts': {
-            'Hydra': HydraClassifier(random_state=0, n_jobs=-1),
-            'Rocket': RocketClassifier(random_state=0, n_jobs=-1),
-            'MultiRocketHydra': MultiRocketHydraClassifier(random_state=0, n_jobs=-1),
-            'Catch22': Catch22Classifier(random_state=0, n_jobs=-1),
-            'QUANT': QUANTClassifier(random_state=0)
+            # 'Hydra': HydraClassifier(random_state=0, n_jobs=-1),
+            # 'Rocket': RocketClassifier(random_state=0, n_jobs=-1),
+            # 'Catch22': Catch22Classifier(random_state=0, n_jobs=-1),
+            # 'QUANT': QUANTClassifier(random_state=0)
         }
     }
 
@@ -74,47 +72,137 @@ def get_models(**kwargs):
 def train_models(X_train, y_train, **kwargs):
     models = get_models(**kwargs)
     trained_models = {}
-    print(f'Training', end=' ')
+    print(f'⏳ TRAINING', end=' ')
     for model_name, clf in models.items():
         clf = make_pipeline(
             StandardScaler(),
             SimpleImputer(missing_values=np.nan, strategy='mean'),
             clf
         )
-        print(f'{model_name}', end=' ')
+        print(f'{model_name}', end='. ')
         clf.fit(X_train, y_train)
-        print('✅', end=' ')
         trained_models[model_name] = clf
+    print('✅')
     return trained_models
 
-def run_models(X_train, y_train, X_test, y_test, **kwargs):
-    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat'}
+def get_metric_row(TP, FP, TN, FN, model_name, ave_time, signal_time, **kwargs):
+    auc, precision, recall, specificity, f1, far, mr = utils.compute_metrics(TP, FP, TN, FN, signal_time)
+    metrics = {'model': model_name, 'window_size': [kwargs['window_size']],'runtime': [ave_time], 'auc': [auc], 'precision': [precision], 'recall': [recall], 'specificity': [specificity], 'f1-score': [f1], 'false alarm rate': [far], 'miss rate': [mr]}
+    return pd.DataFrame(data=metrics)
+
+# def get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs):
+#     auc, precision, recall, specificity, f1, far, mr = utils.compute_metrics(TP, FP, TN, FN, signal_time)
+#     return {'runtime': ave_time, 'auc': auc, 'precision': precision, 'recall': recall, 'specificity': specificity, 'f1-score': f1, 'false alarm rate': far, 'miss rate': mr}
+
+def plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, **kwargs):
+    default_kwargs = {'plot_ave_conf': False}
+    kwargs = {**default_kwargs, **kwargs}
+    if kwargs['plot']:
+        utils.plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=h, ave_time=ave_time, **kwargs)
+    if kwargs['plot_errors'] and (fp >= 1 or fn >= 1):
+        utils.plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=h, ave_time=ave_time, **kwargs)
+    if kwargs['plot_ave_conf'] and (fp >= 1 or fn >= 1):
+        utils.plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=h, ave_time=ave_time, **kwargs)
+
+def run_models(X_train, X_test, y_train, y_test, **kwargs):
+    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False}
     kwargs = {**default_kwargs, **kwargs}
     trained_models = train_models(X_train, y_train, **kwargs)
-    metrics_df = pd.DataFrame(columns=['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score'])
+    metrics_df = pd.DataFrame(columns=['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score', 'false alarm rate', 'miss rate'])
     if kwargs['verbose'] > 2:
         cm_grid = kwargs['cm_grid']
         fig, axs = plt.subplots(*cm_grid, figsize=(10,3), sharey=True)
         fig.supxlabel('Predicted label')
-    metrics_df = pd.DataFrame(columns=['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score', 'false alarm rate', 'miss rate'])
     # get metrics for each trained model
-    for m, (model_name, trained_model) in enumerate(trained_models.items()):
+    confidence_df = pd.DataFrame(columns=['model']+[i for i in range(len(X_test))])
+    conf_dict = {}
+    print('🔍 TESTING', end=' ')
+    for model_name, model in trained_models.items():
+        print(f'{model_name}', end='')
+        conf_dict['model'] = model_name
         signal_time = 0
         TP, FP, TN, FN = 0, 0, 0, 0
-        for ts, y in zip(X_test, y_test):
-            if len(ts) < 120000:
+        for i, (ts, y) in enumerate(zip(X_test, y_test)):
+            if len(ts) < 120000 or len(ts) > 120001:
                 continue
             signal_time += len(ts)
-            tp, fp, tn, fn, ave_time = utils.test_stream(ts, y, model=trained_model)
-            TP += tp
-            FP += fp
-            TN += tn
-            FN += fn
-        auc, precision, recall, specificity, f1, far, mr = utils.get_metrics(TP, FP, TN, FN, signal_time, window_size=kwargs['window_size'])
-        metrics = {'model': [model_name], 'window_size': [kwargs['window_size']],'runtime': [ave_time], 'auc': [auc], 'precision': [precision], 'recall': [recall], 'specificity': [specificity], 'f1-score': [f1], 'false alarm rate': [far], 'miss rate': [mr]}
-        row = pd.DataFrame(data=metrics)
+            c, ave_time = utils.sliding_window_confidence(ts, y, model, **kwargs)
+            conf_dict[i] = [c]
+            tp, fp, tn, fn, h = utils.detect(ts, y, c, **kwargs)
+            plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs)
+            TP, FP, TN, FN = TP+tp, FP+fp, TN+tn, FN+fn
+        row = get_metric_row(TP, FP, TN, FN, model_name, ave_time, signal_time, **kwargs)
         metrics_df = pd.concat([metrics_df, row], ignore_index=True)
+        conf_df = pd.DataFrame(data=conf_dict)
+        confidence_df = pd.concat([confidence_df, conf_df], ignore_index=True)
+        print('.', end=' ')
+    print('Ensemble', end='')
+    # detection based on average confidence
+    TP, FP, TN, FN = 0, 0, 0, 0
+    for i, (ts, y) in enumerate(zip(X_test, y_test)):
+        if len(ts) < 120000 or len(ts) > 120001:
+            continue
+        # this_confidence
+        c = confidence_df[[i]].values.mean()
+        tp, fp, tn, fn, h = utils.detect(ts, y, c, **kwargs)
+        plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs)
+        TP, FP, TN, FN = TP+tp, FP+fp, TN+tn, FN+fn
+    row = get_metric_row(TP, FP, TN, FN, 'Ensemble', ave_time, signal_time, **kwargs)
+    metrics_df = pd.concat([metrics_df, row], ignore_index=True)
+    print('. ✅')
     return metrics_df
+
+# def run_models(X_train, X_test, y_train, y_test, **kwargs):
+#     default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 
+#                       'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False}
+#     kwargs = {**default_kwargs, **kwargs}
+#     trained_models = train_models(X_train, y_train, **kwargs)
+#     metrics_rows = []
+#     confidence_data = []
+
+#     print('🔍 TESTING', end=' ')
+#     for model_name, model in trained_models.items():
+#         print(f'{model_name}', end='')
+#         model_metrics = {'model': model_name, 'window_size': kwargs['window_size']}
+#         signal_time = 0
+#         TP, FP, TN, FN = 0, 0, 0, 0
+#         confidences_for_model = {'model': model_name}
+#         for i, (ts, y) in enumerate(zip(X_test, y_test)):
+#             if len(ts) < 120000 or len(ts) > 120001:
+#                 continue
+#             signal_time += len(ts)
+#             c, ave_time = utils.sliding_window_confidence(ts, y, model, **kwargs)
+#             confidences_for_model[i] = c  
+#             tp, fp, tn, fn, h = utils.detect(ts, y, c, **kwargs)
+#             plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs) 
+#             TP += tp
+#             FP += fp
+#             TN += tn
+#             FN += fn
+#         model_metrics.update(get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs)) 
+#         metrics_rows.append(model_metrics) 
+#         confidence_data.append(confidences_for_model)
+#         print('.', end=' ')
+#     confidence_df = pd.DataFrame(confidence_data)
+
+#     print('Ensemble', end='')
+#     TP, FP, TN, FN = 0, 0, 0, 0
+#     ensemble_metrics = {'model': 'Ensemble', 'window_size': kwargs['window_size']}
+#     for i, (ts, y) in enumerate(zip(X_test, y_test)):
+#         if len(ts) < 120000 or len(ts) > 120001:
+#             continue
+#         c = confidence_df[i].mean()
+#         tp, fp, tn, fn, h = utils.detect(ts, y, c, **kwargs)
+#         plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs)
+#         TP += tp
+#         FP += fp
+#         TN += tn
+#         FN += fn
+#     ensemble_metrics.update(get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs))
+#     metrics_rows.append(ensemble_metrics)
+#     metrics_df = pd.DataFrame(metrics_rows)
+#     print('. ✅')
+#     return metrics_df
 
 def plot_metrics(df, x='model', pivot='f1-score', compare='metrics', **kwargs):
     default_kwargs = {'figsize': (6,2), 'rot': 0}
@@ -217,56 +305,64 @@ def get_dataset_name(dataset):
     return names[dataset]
 
 def cross_validate(dataset, **kwargs):
-    default_kwargs = {'model_type': None, 'models_subset': None,
-                      'window_size': 40, 'cv': 5, 'loaded_df': None,
-                      'verbose': True, 'random_state': 9, 'spacing': 5,'multiphase': False, 'thresh': 1.1, 'step': 5, 'segment_test': False}
+    default_kwargs = {
+        'model_type': None, 'models_subset': None, 'window_size': 40, 'cv': 5, 'loaded_df': None, 
+        'prefall': 1, 'verbose': True, 'random_state': 0, 'multiphase': False, 
+        'thresh': 1.1, 'step': 1, 'segment_test': False, 'random_state': 0
+    }
     kwargs = {**default_kwargs, **kwargs}
     dataset_name = get_dataset_name(dataset)
+    
     if kwargs['loaded_df'] is None:
         df = dataset.load()
     else:
         df = kwargs['loaded_df']
-    rng = np.random.default_rng(kwargs['random_state'])
+        
     subjects = list(df['SubjectID'].unique())
-    rng.shuffle(subjects)
     # divide subjects into cv sets
-    test_sets = list(chunk_list(subjects, kwargs['cv']))
+    if kwargs['cv'] == 1:
+        train, test = train_test_split(subjects, test_size=0.3, random_state=kwargs['random_state'])
+        test_sets = [test]
+    else:
+        rng = np.random.default_rng(kwargs['random_state'])
+        rng.shuffle(subjects)
+        test_sets = list(chunk_list(subjects, kwargs['cv']))
+    
     freq = get_freq(dataset)
     metrics_df = None
+    
     for i, test_set in enumerate(test_sets):
-        test_df = df[df['SubjectID']==test_set[0]]
-        train_df = df.drop(df[df['SubjectID']==test_set[0]].index)
-        for id in test_set[1:]:
-            this_df = df[df['SubjectID']==id]
-            test_df = pd.concat([test_df, this_df], ignore_index=True)
-            train_df.drop(this_df.index, inplace=True)
-            train_df.reset_index().drop(columns=['index'], inplace=True)
-        X_train, y_train = dataset.get_X_y(train_df, **kwargs)
-        X_test, y_test = dataset.get_X_y(test_df, keep_fall=True, **kwargs)
+        X_train, X_test, y_train, y_test = utils.split_df(df, dataset, test_set, **kwargs)
         if kwargs['verbose']:
             print(f'\n\n-- fold {i+1}, testing on ({len(test_set)} subjects) --')
-            print(f"Train set: X: {X_train.shape}, y: {y_train.shape}\
-            ([ADLs, Falls])", np.bincount(y_train))
+            print(f"Train set: X: {X_train.shape}, y: {y_train.shape} ([ADLs, Falls])", np.bincount(y_train))
             print(f"Test set: X: {len(X_test)}, y: {len(y_test)}")
+        
         if metrics_df is None:
-            metrics_df = run_models(X_train, y_train, X_test, y_test, freq=freq, **kwargs)
+            metrics_df = run_models(X_train, X_test, y_train, y_test, freq=freq, **kwargs)
             metrics_df['fold'] = i
         else:
-            this_df = run_models(X_train, y_train, X_test, y_test, freq=freq, **kwargs)
+            this_df = run_models(X_train, X_test, y_train, y_test, freq=freq, **kwargs)
             this_df['fold'] = i
             metrics_df = pd.concat([metrics_df, this_df], ignore_index=True)
+    
     mean_df = metrics_df.groupby(['model']).mean().round(2)
     std_df = metrics_df.groupby(['model']).std().round(2)
     cols = ['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score', 'false alarm rate', 'miss rate']
     aggr = {c: [] for c in cols}
+    
     for i in mean_df.index:
         aggr['model'].append(i)
         for col in cols[1:]:
-            aggr[col].append(f'{mean_df.loc[i][col]} $\pm$ {std_df.loc[i][col]}')
+            aggr[col].append(f'{mean_df.loc[i][col]} ± {std_df.loc[i][col]}')
+    
     aggr_df = pd.DataFrame(data=aggr)
     aggr_df['Dataset'] = dataset_name
     metrics_df['Dataset'] = dataset_name
-    # aggr_df.to_csv(f'results/{dataset_name}_{model_type}_{s}.csv')
+    model_type = kwargs['model_type']
+    s = kwargs['window_size']
+    aggr_df.to_csv(f'results/{dataset_name}{model_type}{s}.csv')
+    
     return metrics_df, aggr_df
 
 def boxplot(df, dataset, model_type, metric='f1-score', save=False, **kwargs):
@@ -283,56 +379,6 @@ def boxplot(df, dataset, model_type, metric='f1-score', save=False, **kwargs):
         plt.savefig(f'figs/{dataset}_{model_type}_boxplot.eps',
                     format='eps', bbox_inches='tight')
     plt.show()
-
-
-def cross_dataset_eval(simulated, real):
-    new_freq = get_freq(real) # resample to the same frequency
-    summary = []
-    # Train on the real dataset first
-    X_train_r, X_test_r, y_train_r, y_test_r = utils.train_test_subjects_split(real, show_test=True)
-    print(f'\n<----- {get_dataset_name(real)} > {get_dataset_name(real)} ----->')
-    train_on_real, _ = run_models(X_train_r, y_train_r, X_test_r,
-                                  y_test_r, type='ts', freq=new_freq)
-    train_on_real['trainset'] = get_dataset_name(real)
-    summary.append(train_on_real)
-
-    # Create lists to hold simulated training sets
-    X_train_s = []
-    y_train_s = []
-    for d in simulated:
-        print(f'\n\n<----- {get_dataset_name(d)} > {get_dataset_name(real)} ----->')
-        X_train_d, _, y_train_d, _ = utils.train_test_subjects_split(
-            d, clip=True, new_freq=new_freq)
-        X_train_s.append(X_train_d)
-        y_train_s.append(y_train_d)
-        cross_df, _ = run_models(
-            X_train_d, y_train_d, X_test_r, y_test_r, freq=new_freq, type='ts')
-        cross_df['trainset'] = get_dataset_name(d)
-        summary.append(cross_df)
-
-        # Mix and train_test_split
-        X_train_m = np.concatenate([X_train_d, X_train_r], axis=0)
-        y_train_m = np.concatenate([y_train_d, y_train_r], axis=0)
-
-        print(f'\n\n<----- {get_dataset_name(d)} + {get_dataset_name(real)} ----->')
-        mixed_df, _ = run_models(
-            X_train_m, y_train_m, X_test_r, y_test_r, freq=new_freq, type='ts')
-        mixed_df['trainset'] = f'{get_dataset_name(d)}+'
-        summary.append(mixed_df)
-    
-    # Join all and train on real
-    X_train_s.append(X_train_r)
-    y_train_s.append(y_train_r)
-    X_train_all = np.concatenate(X_train_s, axis=0)
-    y_train_all = np.concatenate(y_train_s, axis=0)
-
-    print(f'\n\n<----- Combining all training sets from all datasets ----->')
-    all_df, _ = run_models(
-        X_train_all, y_train_all, X_test_r, y_test_r, freq=new_freq, type='ts')
-    all_df['trainset'] = 'All'
-    summary.append(all_df)
-
-    return pd.concat(summary, ignore_index=True)
 
 def get_sample_attributions(clf, X_test, y_test, c=28, normalise=True, n=2):
     y_pred = clf.predict(X_test)

@@ -1,3 +1,6 @@
 data
 .vscode
 models
+predict.ipynb
+predict.py
+main copy.ipynb

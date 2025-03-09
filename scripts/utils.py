@@ -1,4 +1,3 @@
-from curses import window
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -19,99 +18,13 @@ from sklearn.metrics import ConfusionMatrixDisplay
 from scripts import farseeing
 
 
-def predict_eval(model, X_in=None, y_in=None, starttime=None, adapt_threshold=False):
-    target_names = ['ADL', 'Fall']
-    model_name, clf = model
-    has_proba = hasattr(clf, 'predict_proba')
-    if X_in is not None:
-        X_train, X_test = X_in
-        y_train, y_test = y_in
-    print("classifier:", model_name)
-    if starttime is None:
-        starttime = timeit.default_timer()
-    clf.fit(X_train, y_train)
-    if has_proba:
-        probs = clf.predict_proba(X_test)[:, 1]
-        train_probs = clf.predict_proba(X_train)[:, 1]
-    else:
-        if adapt_threshold:
-            adapt_threshold = False
-            print("Setting adapt_threshold=False since chosen classifier has no predict_proba() method")
-    if adapt_threshold:
-        thresholds = np.arange(0, 1, 0.001)
-        # evaluate each threshold
-        scores = [f1_score(y_train, to_labels(train_probs, t)) for t in thresholds]
-        # get best threshold
-        ix = np.argmax(scores)
-        print('Threshold=%.3f, F-Score=%.5f' % (thresholds[ix], scores[ix]))
-        y_pred = to_labels(probs, thresholds[ix])
-    else:
-        y_pred = clf.predict(X_test)
-    print("Time to train + test (sec):", timeit.default_timer() - starttime)
-    if has_proba:
-        print(f'AUC: {np.round(roc_auc_score(y_test, probs), 2)}')
-    else:
-        print("Skipping AUC since chosen classifier has no predict_proba() method")
-    cm = confusion_matrix(y_test, y_pred)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    disp.plot()
-    plt.grid(False)
-    plt.show()
-    print(classification_report(y_test, y_pred, target_names=target_names))
-
-def get_windows(X_train, X_test, y_train, y_test,
-    ts, freq, target, thresh=1.08, step=1, test=False, pip=False,
-    prefall=1, fall=1, postfall=25.5):
-    # Main fall_window = 1 sec, prefall window = 1 sec
-    # postfall window = 1 sec, recovery window = 24.5 secs
-    total_duration = prefall + fall + postfall
-    sample_window_size = int(freq*total_duration)
-    required_length = int(freq*(total_duration))
-    freq_100_length = int(100*(total_duration))
-    # resample to match signals of 100Hz if necessary
-    resample_to_100Hz = freq_100_length != required_length
-    end = len(ts) - int(freq * total_duration)
-    count = 0
-    for j in range(0, len(ts), freq*step):
-        # potential_window = ts[j-int(freq*prefall):j+int(postfall*freq)]
-        potential_window = ts[j:j+sample_window_size]
-        if len(potential_window) < required_length:
-            break
-        main_window = potential_window[freq:2*freq]
-        if len(main_window) == freq*step:
-            if max(main_window) >= thresh:
-                selected_window = potential_window
-                count+=1
-                # if len(selected_window) < required_length:
-                    # excluded.append((selected_window, "selected_window", "not long enough"))
-                    # continue
-                if resample_to_100Hz:
-                    selected_window = resample(selected_window, freq_100_length)
-                if pip:
-                    selected_window = get_pips(selected_window,
-                        k=pip, visualize=False)
-                    selected_window = resample(selected_window, pip)
-                if test:
-                    X_test.append(selected_window)
-                    y_test.append(target)
-                else:
-                    X_train.append(selected_window)
-                    y_train.append(target)
-                # n_windows += 1
-            # else:
-                # excluded.append((main_window, "main_window", "max < 1.4"))
-        # else:
-            # excluded.append((main_window, "main_window", "wrong length"))
-    print(f'target: {target}, count: {count}')
-    return X_train, X_test, y_train, y_test
-
 def magnitude(arr):
     x, y, z = np.array(arr).T.astype('float')
     magnitude = np.sqrt(x**2 + y**2 + z**2)
     magnitude -= min(magnitude)
     return magnitude
 
-def visualize_samples(X_train, y_train, X_test, y_test, dataset):
+def visualize_samples(X_train, X_test, y_train, y_test, dataset):
     X = np.vstack(X_train, X_test)
     y = np.vstack(y_train, y_test)
     visualize_falls_adls(X, y, dataset=dataset)
@@ -217,35 +130,40 @@ def single_subject_split(dataset, **kwargs):
         subject_splits[subject] = (X_train, X_test, y_train, y_test)
     return subject_splits
 
+def split_df(df, dataset, test_set, **kwargs):
+    test_df = df[df['SubjectID']==test_set[0]]
+    train_df = df.drop(df[df['SubjectID']==test_set[0]].index)
+    for id in test_set[1:]:
+        this_df = df[df['SubjectID']==id]
+        test_df = pd.concat([test_df, this_df], ignore_index=True)
+        df.drop(this_df.index, inplace=True)
+        df.reset_index().drop(columns=['index'], inplace=True)
+    X_train, y_train = dataset.get_X_y(df, **kwargs)
+    X_test, y_test = dataset.get_X_y(test_df, keep_fall=True, **kwargs)
+
+    return X_train, X_test, y_train, y_test
+
 def train_test_subjects_split(dataset, **kwargs):
-    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'visualize': False, 'clip': False, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None}
+    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'visualize': False, 'clip': False, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100}
     kwargs = {**default_kwargs, **kwargs}
     df = dataset.load(clip=kwargs['clip'])
     subjects = df['SubjectID'].unique()
     if kwargs['split']==False:
         X, y = dataset.get_X_y(df, **kwargs)
-        if resample:
-            X = resample_to(X, old_f=get_freq(dataset),
-                            new_f=kwargs['new_freq'])
+        # if resample:
+        #     X = resample_to(X, old_f=get_freq(dataset),
+        #                     new_f=kwargs['new_freq'])
         return X, y
     else:
         train_set, test_set = train_test_split(subjects, test_size=kwargs['test_size'], random_state=kwargs['random_state'])
         if kwargs['show_test']:
             print(f'Test set -> {len(test_set)} of {len(subjects)} subjects: {test_set}.')
         test_df = df[df['SubjectID']==test_set[0]]
-        df.drop(df[df['SubjectID']==test_set[0]].index, inplace=True)
-        for id in test_set[1:]:
-            this_df = df[df['SubjectID']==id]
-            test_df = pd.concat([test_df, this_df], ignore_index=True)
-            df.drop(this_df.index, inplace=True)
-            df.reset_index().drop(columns=['index'], inplace=True)
-        X_train, y_train = dataset.get_X_y(df, **kwargs)
-        X_test, y_test = dataset.get_X_y(test_df, keep_fall=True, **kwargs)
-        if resample:
-            X_train = resample_to(X_train, old_f=get_freq(dataset),
-                                  new_f=kwargs['new_freq'])
-            X_test = resample_to(X_test, old_f=get_freq(dataset),
-                                 new_f=kwargs['new_freq'])
+        X_train, X_test, y_train, y_test = split_df(df, dataset, test_set, **kwargs)
+        # if resample:
+        #     X_train = resample_to(X_train, old_f=get_freq(dataset), new_f=kwargs['new_freq'])
+        #     X_test = resample_to(X_test, old_f=get_freq(dataset),
+        #                          new_f=kwargs['new_freq'])
         print(f"Train set: X: {X_train.shape}, y: {y_train.shape}\
         ([ADLs, Falls])", np.bincount(y_train))
         if kwargs['segment_test']:
@@ -352,34 +270,10 @@ def plot_window_size_ablation(window_metrics=None):
     plt.savefig('figs/window_size_ablation.pdf', bbox_inches='tight')
     plt.show()
 
-# def get_confidence(ts, model):
-# 	"""Generate confidence scores for each model.
-# 	Over the whole signal using vectorization
-# 	"""
-# 	num_samples = len(ts)
-# 	chunk_size = 4000
-
-# 	# Ensure num_samples is a multiple of chunk_size
-# 	# pad with zeros if necessary
-# 	if num_samples % chunk_size != 0:
-# 		pad = chunk_size - num_samples % chunk_size
-# 		padded_ts = np.pad(ts, (0, pad), 'constant')
-# 	else:
-# 		padded_ts = ts
-
-# 	num_chunks = len(padded_ts) // chunk_size
-# 	padded_ts = padded_ts.reshape(num_chunks, chunk_size)
-# 	c = model.predict_proba(padded_ts)[:, 1]
-# 	expanded_c = np.repeat(c, chunk_size)
-# 	expanded_c = expanded_c[:num_samples]
-# 	return expanded_c
-
 def plot_confidence(ts, c, y, tp, fp, tn, fn, **kwargs):
     default_kwargs = {'high_conf': None, 'title': None}
     kwargs = {**default_kwargs, **kwargs}
     x = np.arange(len(c))
-    c[-8000:] = 0
-    c[:100] = 0
     fig, ax = plt.subplots(figsize=(12, 6))
     cmap = plt.get_cmap('coolwarm')
     ax.plot(x, c, linestyle=':', label='confidence')
@@ -419,33 +313,43 @@ def plot_confidence(ts, c, y, tp, fp, tn, fn, **kwargs):
         ax.set_title(f'TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}. Time/sample: {kwargs["ave_time"]:.2f} ms. {kwargs["model_name"]}')
     plt.show()
 
-def test_stream(ts, y, model, **kwargs):
-    default_kwargs = {'predict': False, 'title': None, 'label': None, 'model': None, 'model_name': '', 'window_size': 4000, 'plot': False, 'plot_errors': True, 'signal_thresh': 1.4, 'confidence_thresh': 0.5} 
+def detect(ts, fall_point, c, tolerance=20, **kwargs):
+    default_kwargs = {'confidence_thresh': 0.5}
     kwargs = {**default_kwargs, **kwargs}
-    ts = np.array(ts)
-    c, ave_time = sliding_window_confidence(ts, model, pad=True)
-
+    """Obtain TP, FP, TN, and FN based on confidence mapping."""
+    window_size = kwargs['window_size']
     # Get high confidence regions
     high_conf = get_high_confidence_regions(ts, c, **kwargs)
-    n_samples = len(ts)//kwargs['window_size']
-    tp, fp, tn, fn = evaluate_detection(n_samples, c, high_conf, y)
     
-    if kwargs['plot']:
-        plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=high_conf, ave_time=ave_time, **kwargs)
-
-    if kwargs['plot_errors'] and (fp >= 1 or fn >= 1):
-        plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=high_conf, ave_time=ave_time, **kwargs)
+    n_samples = len(ts) // (kwargs['window_size']*kwargs['freq'])
+    TP, FP, TN, FN = 0, 0, 0, 0
+    left_all = fall_point - 100*(window_size + tolerance)
+    right_all = fall_point + 100*(tolerance)
+    fall_range = np.arange(left_all, right_all)
+    if high_conf is None:
+        TP, FP, TN, FN = 0, 0, n_samples-1, 1
+    else:
+        for h in high_conf:
+            detection_range = range(h, h + 100*(window_size + tolerance))
+            IOU = iou(detection_range, fall_range)
+            if IOU != 0:
+                TP = 1
+            else:
+                FP += 1
+        FN = 1 if TP == 0 else 0
+        TN = n_samples - TP - FP - FN
     
-    return tp, fp, tn, fn, ave_time
+    return TP, FP, TN, FN, high_conf
 
 def get_high_confidence_regions(ts, c, **kwargs):
     """Get high confidence regions based on threshold."""
 
     # Combine signal threshold and confidence threshold
-    # high_conf = np.where((c > thresh) & (c>=max(c)))[0]
-    high_conf_idx = np.where(c > kwargs['confidence_thresh'])[0]
-    signal_points_above_thresh = np.where(ts > kwargs['signal_thresh'])[0]
-    high_conf = np.intersect1d(high_conf_idx, signal_points_above_thresh, assume_unique=True)
+    thresh = kwargs['confidence_thresh']
+    high_conf = np.where((c > thresh))[0]
+    # high_conf = np.where(c > kwargs['confidence_thresh'])[0]
+    # signal_points_above_thresh = np.where(ts > kwargs['signal_thresh'])[0]
+    # high_conf = np.intersect1d(high_conf_idx, signal_points_above_thresh, assume_unique=True)
     if len(high_conf) == 0:
         return None
     high_conf_diff = np.diff(high_conf, prepend=0)
@@ -457,33 +361,19 @@ def get_high_confidence_regions(ts, c, **kwargs):
     else:
         high_conf = np.array([first_point, *the_rest])
     # Final check on high confidence points
-    high_conf = [h for h in high_conf if c[h] >= max(c[:h])]
+    # high_conf = [h for h in high_conf if c[h] >= max(c[:h])]
     return high_conf if len(high_conf) > 0 else None
 
-def evaluate_detection(n_samples, c, high_conf, fall_point, window_size=4000, tolerance=2000):
-    """Evaluate TP, FP, TN, and FN based on confidence mapping."""
-    TP, FP, TN, FN = 0, 0, 0, 0
-    fall_range = range(fall_point - window_size - tolerance,
-                       fall_point + window_size + tolerance)
-    before_fall = range(0, fall_point - window_size - tolerance)
-    after_fall = range(fall_point + window_size + tolerance, len(c))
-    if high_conf is None:
-        TP, FP, TN, FN = 0, 0, n_samples-1, 1
-    else:
-        if any([h in fall_range for h in high_conf]):
-            TP = 1
-        else:
-            FN = 1
-        for h in high_conf:
-            if h in before_fall or h in after_fall:
-                FP += 1
-        TN = n_samples - TP - FP - FN
-    return TP, FP, TN, FN
+def iou(a, b):
+    """Compute intersection over union of two sets."""
+    intersection = len(set(a).intersection(set(b)))
+    union = len(set(a).union(set(b)))
+    return intersection / union if union > 0 else 0
 
-def get_metrics(tp, fp, tn, fn, signal_time, window_size=4000):
+def compute_metrics(tp, fp, tn, fn, signal_time):
     """Compute metrics based on TP, FP, TN, FN, and signal time."""   
     # Compute metrics
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    precision = np.round(tp / (tp + fp), 2) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
     f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
@@ -504,22 +394,17 @@ def get_metrics(tp, fp, tn, fn, signal_time, window_size=4000):
     return auc, precision, recall, specificity, f1, far, mr
 
 
-def sliding_window_confidence(ts, model, window_size=4000, step=100, pad=True, method='max'):
-    """
-    Computes confidence mapping for a time series using sliding windows.
-    
-    Parameters:
-    - ts: np.array, the time series data.
-    - model: classifier model with predict_proba method.
-    - window_size: int, size of each sliding window.
-    - step: int, step size for sliding window.
-    - pad: bool, whether to pad the time series to match window size.
-    - method: str, either 'max' (track max confidence) or 'mean' (average confidence).
-    
-    Returns:
-    - conf_map: np.array, confidence scores mapped to the time series.
-    """
+def sliding_window_confidence(ts, y, model, **kwargs):
+    default_kwargs = {'predict': False, 'title': None, 'label': None, 'model_name': '', 'window_size': 40, 'signal_thresh': 1.04, 'freq': 100, 'step': 1, 'method': 'max', 'pad': False} 
+    kwargs = {**default_kwargs, **kwargs}
+    method = kwargs['method']
+    pad = kwargs['pad']
+    step = kwargs['step'] * kwargs['freq']
+    freq = kwargs['freq']
+    window_size = int(kwargs['window_size']*freq)
+    signal_thresh = kwargs['signal_thresh']
     start_time = time.time()
+    ts = np.array(ts)
     n = len(ts)
     pad_size = (window_size - (n % window_size)) % window_size if pad else 0
     if pad_size:
@@ -537,16 +422,20 @@ def sliding_window_confidence(ts, model, window_size=4000, step=100, pad=True, m
         if end > n:
             break  # Ensure we don't exceed array bounds
         window = np.array(ts[start:end]).reshape(1, -1)
-        indices.append((start, end))
+        # filter out windows with max < signal_thresh
+        f1 = int(freq*kwargs['prefall']) if 'prefall' in kwargs and kwargs['prefall'] is not None else freq
+        f2 = f1 + freq
+        above_thresh = np.max(window[:, f1:f2]) >= signal_thresh
+        indices.append((start, end, above_thresh))
         X.append(window)
     
     if X:
         confidence_scores = model.predict_proba(np.vstack(X))[:, 1]  
     
         for (start, end), score in zip(indices, confidence_scores):
-            if method == 'max':
+            if method == 'max' and above_thresh:
                 conf_map[start:end] = np.maximum(conf_map[start:end], score)
-            elif method == 'mean':
+            elif method == 'mean' and above_thresh:
                 conf_map[start:end] += score
                 count_map[start:end] += 1
     
@@ -556,7 +445,34 @@ def sliding_window_confidence(ts, model, window_size=4000, step=100, pad=True, m
     
     conf_map[conf_map == -np.inf] = 0  # Replace untouched values with 0 for max method
     conf_map[:len(ts) - pad_size] if pad_size else conf_map
+    # smoothen the confidence map
+    # conf_map = np.convolve(conf_map, np.ones(100)/100, mode='same')
     stop_time = time.time()
     total_time = 1000000*(stop_time - start_time)/conf_map.shape[0]
 
     return conf_map, total_time
+
+def compute_confidence(ts, model):
+    """Generate confidence scores for each model.
+    Over the whole signal using vectorization
+    """
+    start_time = time.time()
+    num_samples = len(ts)
+    chunk_size = 4000
+
+    # Ensure num_samples is a multiple of chunk_size
+    # pad with zeros if necessary
+    if num_samples % chunk_size != 0:
+        pad = chunk_size - num_samples % chunk_size
+        padded_ts = np.pad(ts, (0, pad), 'constant')
+    else:
+        padded_ts = ts
+
+    num_chunks = len(padded_ts) // chunk_size
+    padded_ts = padded_ts.reshape(num_chunks, chunk_size)
+    c = model.predict_proba(padded_ts)[:, 1]
+    stop_time = time.time()
+    expanded_c = np.repeat(c, chunk_size)
+    expanded_c = expanded_c[:num_samples]
+    total_time = 1000000*(stop_time - start_time)/expanded_c.shape[0]
+    return expanded_c, total_time
