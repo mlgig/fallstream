@@ -1,4 +1,5 @@
 import copy
+from email.policy import default
 from re import sub
 import timeit
 from turtle import mode
@@ -24,6 +25,7 @@ from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.model_selection import train_test_split
+from sklearn.model_selection import TunedThresholdClassifierCV
 from sklearn.pipeline import make_pipeline
 
 from sklearn.metrics import roc_auc_score, roc_curve, auc
@@ -39,21 +41,20 @@ from aeon.classification.feature_based import Catch22Classifier
 from aeon.classification.interval_based import QUANTClassifier
 from aeon.classification.convolution_based import RocketClassifier, HydraClassifier
 from aeon.classification.convolution_based import MultiRocketHydraClassifier
+from aeon.classification.deep_learning import LITETimeClassifier, ResNetClassifier
 
 
 def get_models(**kwargs):
     all_models = {
         'tabular': {
-            # 'LogisticCV': LogisticRegressionCV(cv=5, n_jobs=-1, solver='newton-cg'),
-            # 'RandomForest': RandomForestClassifier(n_estimators=150, random_state=0),
-            # 'KNN': KNeighborsClassifier(),
+            'LogisticCV': LogisticRegressionCV(cv=5, n_jobs=-1, solver='newton-cg'),
+            'RandomForest': RandomForestClassifier(n_estimators=150, random_state=0),
             'ExtraTrees': ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state =0),
         },
         'ts': {
-            # 'Hydra': HydraClassifier(random_state=0, n_jobs=-1),
-            # 'Rocket': RocketClassifier(random_state=0, n_jobs=-1),
-            # 'Catch22': Catch22Classifier(random_state=0, n_jobs=-1),
-            # 'QUANT': QUANTClassifier(random_state=0)
+            'Rocket': RocketClassifier(random_state=0, n_jobs=-1),
+            'Catch22': Catch22Classifier(random_state=0, n_jobs=-1),
+            'QUANT': QUANTClassifier(random_state=0)
         }
     }
 
@@ -70,8 +71,11 @@ def get_models(**kwargs):
     return models
 
 def train_models(X_train, y_train, **kwargs):
+    default_kwargs = {'tuned_threshold': False}
+    kwargs = {**default_kwargs, **kwargs}
     models = get_models(**kwargs)
     trained_models = {}
+    best_thresholds = {}
     print(f'⏳ TRAINING', end=' ')
     for model_name, clf in models.items():
         clf = make_pipeline(
@@ -82,17 +86,23 @@ def train_models(X_train, y_train, **kwargs):
         print(f'{model_name}', end='. ')
         clf.fit(X_train, y_train)
         trained_models[model_name] = clf
+        if kwargs['tuned_threshold']:
+            clf_tuned = TunedThresholdClassifierCV(
+                clf, cv=5, scoring='f1',
+                n_jobs=-1).fit(X_train, y_train)
+            best_threshold = clf_tuned.best_threshold_
+            best_thresholds[model_name] = best_threshold
     print('✅')
-    return trained_models
+    return trained_models, best_thresholds
 
 def get_metric_row(TP, FP, TN, FN, model_name, ave_time, signal_time, **kwargs):
     auc, precision, recall, specificity, f1, far, mr = utils.compute_metrics(TP, FP, TN, FN, signal_time)
     metrics = {'model': model_name, 'window_size': [kwargs['window_size']],'runtime': [ave_time], 'auc': [auc], 'precision': [precision], 'recall': [recall], 'specificity': [specificity], 'f1-score': [f1], 'false alarm rate': [far], 'miss rate': [mr]}
     return pd.DataFrame(data=metrics)
 
-# def get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs):
-#     auc, precision, recall, specificity, f1, far, mr = utils.compute_metrics(TP, FP, TN, FN, signal_time)
-#     return {'runtime': ave_time, 'auc': auc, 'precision': precision, 'recall': recall, 'specificity': specificity, 'f1-score': f1, 'false alarm rate': far, 'miss rate': mr}
+def get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs):
+    auc, precision, recall, specificity, f1, far, mr = utils.compute_metrics(TP, FP, TN, FN, signal_time)
+    return {'runtime': ave_time, 'auc': auc, 'precision': precision, 'recall': recall, 'specificity': specificity, 'f1-score': f1, 'false alarm rate': far, 'miss rate': mr}
 
 def plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, **kwargs):
     default_kwargs = {'plot_ave_conf': False}
@@ -104,105 +114,61 @@ def plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, **kwargs):
     if kwargs['plot_ave_conf'] and (fp >= 1 or fn >= 1):
         utils.plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=h, ave_time=ave_time, **kwargs)
 
+
 def run_models(X_train, X_test, y_train, y_test, **kwargs):
-    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False}
+    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 
+                      'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False}
     kwargs = {**default_kwargs, **kwargs}
-    trained_models = train_models(X_train, y_train, **kwargs)
-    metrics_df = pd.DataFrame(columns=['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score', 'false alarm rate', 'miss rate'])
-    if kwargs['verbose'] > 2:
-        cm_grid = kwargs['cm_grid']
-        fig, axs = plt.subplots(*cm_grid, figsize=(10,3), sharey=True)
-        fig.supxlabel('Predicted label')
-    # get metrics for each trained model
-    confidence_df = pd.DataFrame(columns=['model']+[i for i in range(len(X_test))])
-    conf_dict = {}
+    trained_models, threshholds = train_models(
+        X_train, y_train, **kwargs)
+    metrics_rows = []
+    confidence_data = []
+
     print('🔍 TESTING', end=' ')
     for model_name, model in trained_models.items():
         print(f'{model_name}', end='')
-        conf_dict['model'] = model_name
+        model_metrics = {'model': model_name, 'window_size': kwargs['window_size']}
         signal_time = 0
         TP, FP, TN, FN = 0, 0, 0, 0
+        confidences_for_model = {'model': model_name}
         for i, (ts, y) in enumerate(zip(X_test, y_test)):
             if len(ts) < 120000 or len(ts) > 120001:
                 continue
             signal_time += len(ts)
             c, ave_time = utils.sliding_window_confidence(ts, y, model, **kwargs)
-            conf_dict[i] = [c]
-            tp, fp, tn, fn, h = utils.detect(ts, y, c, **kwargs)
-            plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs)
-            TP, FP, TN, FN = TP+tp, FP+fp, TN+tn, FN+fn
-        row = get_metric_row(TP, FP, TN, FN, model_name, ave_time, signal_time, **kwargs)
-        metrics_df = pd.concat([metrics_df, row], ignore_index=True)
-        conf_df = pd.DataFrame(data=conf_dict)
-        confidence_df = pd.concat([confidence_df, conf_df], ignore_index=True)
+            confidences_for_model[i] = c
+            thresh = threshholds[model_name] if threshholds != {} else 0.5
+            tp, fp, tn, fn, h = utils.detect(
+                ts, y, c, confidence_thresh=thresh, **kwargs)
+            plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs) 
+            TP += tp
+            FP += fp
+            TN += tn
+            FN += fn
+        model_metrics.update(get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs)) 
+        metrics_rows.append(model_metrics) 
+        confidence_data.append(confidences_for_model)
         print('.', end=' ')
+        confidence_df = pd.DataFrame(confidence_data)
+
     print('Ensemble', end='')
-    # detection based on average confidence
     TP, FP, TN, FN = 0, 0, 0, 0
+    ensemble_metrics = {'model': 'Ensemble', 'window_size': kwargs['window_size']}
     for i, (ts, y) in enumerate(zip(X_test, y_test)):
         if len(ts) < 120000 or len(ts) > 120001:
             continue
-        # this_confidence
-        c = confidence_df[[i]].values.mean()
+        c = confidence_df[i].mean()
         tp, fp, tn, fn, h = utils.detect(ts, y, c, **kwargs)
         plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs)
-        TP, FP, TN, FN = TP+tp, FP+fp, TN+tn, FN+fn
-    row = get_metric_row(TP, FP, TN, FN, 'Ensemble', ave_time, signal_time, **kwargs)
-    metrics_df = pd.concat([metrics_df, row], ignore_index=True)
+        TP += tp
+        FP += fp
+        TN += tn
+        FN += fn
+    ensemble_metrics.update(get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs))
+    metrics_rows.append(ensemble_metrics)
+    metrics_df = pd.DataFrame(metrics_rows)
     print('. ✅')
     return metrics_df
-
-# def run_models(X_train, X_test, y_train, y_test, **kwargs):
-#     default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 
-#                       'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False}
-#     kwargs = {**default_kwargs, **kwargs}
-#     trained_models = train_models(X_train, y_train, **kwargs)
-#     metrics_rows = []
-#     confidence_data = []
-
-#     print('🔍 TESTING', end=' ')
-#     for model_name, model in trained_models.items():
-#         print(f'{model_name}', end='')
-#         model_metrics = {'model': model_name, 'window_size': kwargs['window_size']}
-#         signal_time = 0
-#         TP, FP, TN, FN = 0, 0, 0, 0
-#         confidences_for_model = {'model': model_name}
-#         for i, (ts, y) in enumerate(zip(X_test, y_test)):
-#             if len(ts) < 120000 or len(ts) > 120001:
-#                 continue
-#             signal_time += len(ts)
-#             c, ave_time = utils.sliding_window_confidence(ts, y, model, **kwargs)
-#             confidences_for_model[i] = c  
-#             tp, fp, tn, fn, h = utils.detect(ts, y, c, **kwargs)
-#             plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs) 
-#             TP += tp
-#             FP += fp
-#             TN += tn
-#             FN += fn
-#         model_metrics.update(get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs)) 
-#         metrics_rows.append(model_metrics) 
-#         confidence_data.append(confidences_for_model)
-#         print('.', end=' ')
-#     confidence_df = pd.DataFrame(confidence_data)
-
-#     print('Ensemble', end='')
-#     TP, FP, TN, FN = 0, 0, 0, 0
-#     ensemble_metrics = {'model': 'Ensemble', 'window_size': kwargs['window_size']}
-#     for i, (ts, y) in enumerate(zip(X_test, y_test)):
-#         if len(ts) < 120000 or len(ts) > 120001:
-#             continue
-#         c = confidence_df[i].mean()
-#         tp, fp, tn, fn, h = utils.detect(ts, y, c, **kwargs)
-#         plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs)
-#         TP += tp
-#         FP += fp
-#         TN += tn
-#         FN += fn
-#     ensemble_metrics.update(get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs))
-#     metrics_rows.append(ensemble_metrics)
-#     metrics_df = pd.DataFrame(metrics_rows)
-#     print('. ✅')
-#     return metrics_df
 
 def plot_metrics(df, x='model', pivot='f1-score', compare='metrics', **kwargs):
     default_kwargs = {'figsize': (6,2), 'rot': 0}

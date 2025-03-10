@@ -274,7 +274,7 @@ def plot_confidence(ts, c, y, tp, fp, tn, fn, **kwargs):
     default_kwargs = {'high_conf': None, 'title': None}
     kwargs = {**default_kwargs, **kwargs}
     x = np.arange(len(c))
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(12, 6), dpi=200)
     cmap = plt.get_cmap('coolwarm')
     ax.plot(x, c, linestyle=':', label='confidence')
 
@@ -432,7 +432,7 @@ def sliding_window_confidence(ts, y, model, **kwargs):
     if X:
         confidence_scores = model.predict_proba(np.vstack(X))[:, 1]  
     
-        for (start, end), score in zip(indices, confidence_scores):
+        for (start, end, above_thresh), score in zip(indices, confidence_scores):
             if method == 'max' and above_thresh:
                 conf_map[start:end] = np.maximum(conf_map[start:end], score)
             elif method == 'mean' and above_thresh:
