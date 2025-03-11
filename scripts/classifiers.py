@@ -116,8 +116,7 @@ def plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, **kwargs):
 
 
 def run_models(X_train, X_test, y_train, y_test, **kwargs):
-    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 
-                      'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False}
+    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False, 'step': 1}
     kwargs = {**default_kwargs, **kwargs}
     trained_models, threshholds = train_models(
         X_train, y_train, **kwargs)
@@ -169,24 +168,6 @@ def run_models(X_train, X_test, y_train, y_test, **kwargs):
     metrics_df = pd.DataFrame(metrics_rows)
     print('. ✅')
     return metrics_df
-
-def plot_metrics(df, x='model', pivot='f1-score', compare='metrics', **kwargs):
-    default_kwargs = {'figsize': (6,2), 'rot': 0}
-    kwargs = {**default_kwargs, **kwargs}
-    if compare=='metrics':
-        w = max(df['window_size'])
-        window_df = df[df['window_size']==w].drop(columns=['window_size', 'runtime'])
-        window_df.plot(kind='bar', x='model', **kwargs)
-    elif compare=='window_size':
-        crosstab = df.pivot_table(pivot, ['model'], 'window_size')
-        crosstab.plot(kind='bar', rot=0, **kwargs)
-        plt.grid()
-        plt.xlabel('')
-        plt.ylabel('')
-        sns.despine()
-    else:
-        df.plot(kind='bar', x='model', y=compare)
-    plt.legend(loc=9, ncol=3, bbox_to_anchor=(0.5,1.3), title=compare) 
 
 def to_labels(pos_probs, threshold):
     # apply threshold to positive probabilities to create labels

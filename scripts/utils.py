@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -176,7 +177,29 @@ def train_test_subjects_split(dataset, **kwargs):
             visualize_falls_adls(X_test, y_test, dataset="test")
         return X_train, X_test, y_train, y_test
     
-def summary_visualization(dfs, x='model', model_type='ts', title=None, xlabel=None):
+def visualise_all_metrics(df, metrics, name='farseeing'):
+    plt.rcParams.update({'font.size': 13})
+    fig, axs = plt.subplots(2, 2, figsize=(8, 6), dpi=400,
+                            layout='constrained', sharex=True,
+                            sharey='row')
+    for i, metric in enumerate(metrics):
+        ax = axs.flat[i]
+        sns.boxplot(data=df, x='model', y=metric, width=0.5,
+                    ax=ax, linewidth=1, palette='tab10')
+        ax.grid()
+        metric = 'runtime (ms)' if metric == 'runtime' else metric
+        metric = 'FAR (per hour)' if metric == 'false alarm rate' else metric
+        metric = 'MR (per hour)' if metric == 'miss rate' else metric
+        ax.set_title(metric)
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        plt.setp(ax.get_xticklabels(), rotation=60, ha='right')
+    sns.despine()
+    os.makedirs('figs', exist_ok=True)  
+    plt.savefig(f'figs/{name}_metrics_boxplot.pdf', format='pdf', bbox_inches='tight')
+    plt.show()
+
+def summary_visualization(dfs, x='model', name='models', title='', xlabel=None):
     dataset_names = ['FARSEEING', 'FallAllD', 'SisFall']
     plt.rcParams.update({'font.size': 13})
     fig, axs = plt.subplots(1,len(dfs), figsize=(6, 4), dpi=400,
@@ -186,10 +209,7 @@ def summary_visualization(dfs, x='model', model_type='ts', title=None, xlabel=No
         ax = axs[d] if len(dfs) > 1 else axs
         sns.boxplot(data=df, x=x, y='f1-score', width=0.5, ax=ax, linewidth=1, palette='tab10')
         ax.grid(axis='y')
-        if title is not None:
-            ax.set_title(title)
-        else:
-            ax.set_title(dataset_names[d])
+        ax.set_title(title)
         if xlabel is not None:
             ax.set_xlabel(xlabel)
         else:
@@ -199,7 +219,8 @@ def summary_visualization(dfs, x='model', model_type='ts', title=None, xlabel=No
             ax.set_ylabel('')
         plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
     sns.despine()
-    # plt.savefig(f'figs/{model_type}_summary_boxplot.eps', format='eps', bbox_inches='tight')
+    os.makedirs('figs', exist_ok=True)  
+    plt.savefig(f'figs/{name}_summary_boxplot.pdf', format='pdf', bbox_inches='tight')
     plt.show()
 
 def ts_vs_tabular_summary(all_dfs):
@@ -318,13 +339,15 @@ def detect(ts, fall_point, c, tolerance=20, **kwargs):
     kwargs = {**default_kwargs, **kwargs}
     """Obtain TP, FP, TN, and FN based on confidence mapping."""
     window_size = kwargs['window_size']
+    step_size = kwargs['step']
     # Get high confidence regions
     high_conf = get_high_confidence_regions(ts, c, **kwargs)
     
-    n_samples = len(ts) // (kwargs['window_size']*kwargs['freq'])
+    # n_samples = len(ts) // (kwargs['window_size']*kwargs['freq'])
+    n_samples = ((len(ts) - window_size) // step_size) + 1
     TP, FP, TN, FN = 0, 0, 0, 0
-    left_all = fall_point - 100*(window_size + tolerance)
-    right_all = fall_point + 100*(tolerance)
+    left_all = (fall_point - 100) - 100*(window_size + tolerance)
+    right_all = (fall_point + 100*(window_size-1)) + 100*(tolerance)
     fall_range = np.arange(left_all, right_all)
     if high_conf is None:
         TP, FP, TN, FN = 0, 0, n_samples-1, 1
@@ -476,3 +499,21 @@ def compute_confidence(ts, model):
     expanded_c = expanded_c[:num_samples]
     total_time = 1000000*(stop_time - start_time)/expanded_c.shape[0]
     return expanded_c, total_time
+
+def plot_metrics(df, x='model', pivot='f1-score', compare='metrics', **kwargs):
+    default_kwargs = {'figsize': (6,2), 'rot': 0}
+    kwargs = {**default_kwargs, **kwargs}
+    if compare=='metrics':
+        w = max(df['window_size'])
+        window_df = df[df['window_size']==w].drop(columns=['window_size', 'runtime'])
+        window_df.plot(kind='bar', x='model', **kwargs)
+    elif compare=='window_size':
+        crosstab = df.pivot_table(pivot, ['model'], 'window_size')
+        crosstab.plot(kind='bar', rot=0, **kwargs)
+        plt.grid()
+        plt.xlabel('')
+        plt.ylabel('')
+        sns.despine()
+    else:
+        df.plot(kind='bar', x='model', y=compare)
+    plt.legend(loc=9, ncol=3, bbox_to_anchor=(0.5,1.3), title=compare) 
