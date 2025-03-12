@@ -415,7 +415,8 @@ def compute_metrics(cm, signal_time):
     far = (fpr * total_neg_samples) / hours if hours > 0 else 0
     # Miss rate per hour
     mr = (fnr * total_pos_samples) / hours if hours > 0 else 0
-    gain = classifiers.cost_fn(cm=cm) / hours if hours > 0 else 0
+    n_samples = np.sum(cm)
+    gain = classifiers.cost_fn(cm=cm) / n_samples if n_samples > 0 else 0
 
     return auc, precision, recall, specificity, f1, far, mr, gain
 
@@ -449,9 +450,9 @@ def sliding_window_confidence(ts, y, model, **kwargs):
             break  # Ensure we don't exceed array bounds
         window = np.array(ts[start:end]).reshape(1, -1)
         # filter out windows with max < signal_thresh
-        f1 = int(freq*kwargs['prefall']) if 'prefall' in kwargs and kwargs['prefall'] is not None else freq
-        f2 = f1 + freq
-        above_thresh = np.max(window[:, f1:f2]) >= signal_thresh
+        # f1 = int(freq*kwargs['prefall']) if 'prefall' in kwargs and kwargs['prefall'] is not None else freq
+        # f2 = f1 + freq
+        above_thresh = np.max(window) >= signal_thresh
         indices.append((start, end, above_thresh))
         X.append(window)
     

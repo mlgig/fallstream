@@ -74,8 +74,8 @@ def cost_fn(y_true=None, y_pred=None, cm=None):
     """
     if cm is None:
         cm = confusion_matrix(y_true, y_pred)
-    gain_matrix = np.array([[0, -1], # -1 gain for false alarms
-                            [-10, 1] # -10 gain for missed falls, 1 gain for TP
+    gain_matrix = np.array([[1, -1], # -1 gain for false alarms
+                            [-10, 2] # -10 gain for missed falls, 1 gain for TP
                           ])
     return np.sum(cm * gain_matrix)
 
