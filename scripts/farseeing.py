@@ -107,7 +107,7 @@ def get_X_y(df, **kwargs):
         y = np.array(y, dtype='uint8')
     return X, y
 
-def get_adls(ts, freq, fall_point, **kwargs):
+def get_adls(ts, freq=100, fall_point=None, **kwargs):
     """
     Get candidate windows for ADLs. Loop through ts with a step of 5 seconds. Select windows with max value >= thresh.
     Any window where fall_point is within the window is labelled as a fall.
@@ -128,7 +128,7 @@ def get_adls(ts, freq, fall_point, **kwargs):
             if resample_to_100Hz:
                 potential_window = resample(potential_window, freq_100_length)
             X.append(potential_window)
-            if fall_point in range(j, j+sample_window_size):
+            if fall_point is not None and fall_point in range(j, j+sample_window_size):
                 y.append(1)
             else:
                 y.append(0)

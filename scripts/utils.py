@@ -16,7 +16,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
 from sklearn.metrics import ConfusionMatrixDisplay
-from scripts import farseeing
+from scripts import farseeing, classifiers
 
 
 def magnitude(arr):
@@ -145,7 +145,7 @@ def split_df(df, dataset, test_set, **kwargs):
     return X_train, X_test, y_train, y_test
 
 def train_test_subjects_split(dataset, **kwargs):
-    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'visualize': False, 'clip': False, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100}
+    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'visualize': False, 'clip': False, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100, 'augment_data': None}
     kwargs = {**default_kwargs, **kwargs}
     df = dataset.load(clip=kwargs['clip'])
     subjects = df['SubjectID'].unique()
@@ -361,8 +361,9 @@ def detect(ts, fall_point, c, tolerance=20, **kwargs):
                 FP += 1
         FN = 1 if TP == 0 else 0
         TN = n_samples - TP - FP - FN
+    cm = np.array([[TP, FP], [FN, TN]])
     
-    return TP, FP, TN, FN, high_conf
+    return cm, high_conf
 
 def get_high_confidence_regions(ts, c, **kwargs):
     """Get high confidence regions based on threshold."""
@@ -393,9 +394,10 @@ def iou(a, b):
     union = len(set(a).union(set(b)))
     return intersection / union if union > 0 else 0
 
-def compute_metrics(tp, fp, tn, fn, signal_time):
+def compute_metrics(cm, signal_time):
     """Compute metrics based on TP, FP, TN, FN, and signal time."""   
     # Compute metrics
+    tp, fp, fn, tn = cm.ravel()
     precision = np.round(tp / (tp + fp), 2) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
@@ -413,8 +415,9 @@ def compute_metrics(tp, fp, tn, fn, signal_time):
     far = (fpr * total_neg_samples) / hours if hours > 0 else 0
     # Miss rate per hour
     mr = (fnr * total_pos_samples) / hours if hours > 0 else 0
+    gain = classifiers.cost_fn(cm=cm) / hours if hours > 0 else 0
 
-    return auc, precision, recall, specificity, f1, far, mr
+    return auc, precision, recall, specificity, f1, far, mr, gain
 
 
 def sliding_window_confidence(ts, y, model, **kwargs):

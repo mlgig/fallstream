@@ -1,14 +1,11 @@
-import copy
-from email.policy import default
-from re import sub
+import copy, joblib
+from re import X
 import timeit
-from turtle import mode
 import numpy as np, pandas as pd
 from scipy.signal import resample
 from scipy.signal import savgol_filter
 import matplotlib.pyplot as plt, seaborn as sns
 import matplotlib.colors as mcolors
-from sympy import plot
 import test
 sns.set_style("ticks")
 import warnings
@@ -30,7 +27,7 @@ from sklearn.pipeline import make_pipeline
 
 from sklearn.metrics import roc_auc_score, roc_curve, auc
 from sklearn.metrics import precision_recall_fscore_support
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, make_scorer
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
@@ -70,12 +67,26 @@ def get_models(**kwargs):
     
     return models
 
+def cost_fn(y_true=None, y_pred=None, cm=None):
+    """
+    Thanks to https://scikit-learn.org/stable/auto_examples/model_selection/plot_cost_sensitive_learning.html#sphx-glr-auto-examples-model-selection-plot-cost-sensitive-learning-py
+    The count of true negatives is cm[0,0], false negatives is cm[1,0], true positives is cm[1,1] and false positives is cm[0,1].
+    """
+    if cm is None:
+        cm = confusion_matrix(y_true, y_pred)
+    gain_matrix = np.array([[0, -1], # -1 gain for false alarms
+                            [-10, 1] # -10 gain for missed falls, 1 gain for TP
+                          ])
+    return np.sum(cm * gain_matrix)
+
+
 def train_models(X_train, y_train, **kwargs):
-    default_kwargs = {'tuned_threshold': False}
+    default_kwargs = {'tune_threshold': False}
     kwargs = {**default_kwargs, **kwargs}
     models = get_models(**kwargs)
     trained_models = {}
     best_thresholds = {}
+    cost_score = make_scorer(cost_fn)
     print(f'⏳ TRAINING', end=' ')
     for model_name, clf in models.items():
         clf = make_pipeline(
@@ -86,12 +97,13 @@ def train_models(X_train, y_train, **kwargs):
         print(f'{model_name}', end='. ')
         clf.fit(X_train, y_train)
         trained_models[model_name] = clf
-        if kwargs['tuned_threshold']:
+        if kwargs['tune_threshold']:
             clf_tuned = TunedThresholdClassifierCV(
-                clf, cv=5, scoring='f1',
-                n_jobs=-1).fit(X_train, y_train)
+                clf, cv=5, scoring=cost_score
+                ).fit(X_train, y_train)
             best_threshold = clf_tuned.best_threshold_
             best_thresholds[model_name] = best_threshold
+            print(f'thresh: {best_threshold}', end=' ')
     print('✅')
     return trained_models, best_thresholds
 
@@ -100,13 +112,14 @@ def get_metric_row(TP, FP, TN, FN, model_name, ave_time, signal_time, **kwargs):
     metrics = {'model': model_name, 'window_size': [kwargs['window_size']],'runtime': [ave_time], 'auc': [auc], 'precision': [precision], 'recall': [recall], 'specificity': [specificity], 'f1-score': [f1], 'false alarm rate': [far], 'miss rate': [mr]}
     return pd.DataFrame(data=metrics)
 
-def get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs):
-    auc, precision, recall, specificity, f1, far, mr = utils.compute_metrics(TP, FP, TN, FN, signal_time)
-    return {'runtime': ave_time, 'auc': auc, 'precision': precision, 'recall': recall, 'specificity': specificity, 'f1-score': f1, 'false alarm rate': far, 'miss rate': mr}
+def get_metric_row_dict(CM, ave_time, signal_time, **kwargs):
+    auc, precision, recall, specificity, f1, far, mr, gain = utils.compute_metrics(CM, signal_time)
+    return {'runtime': ave_time, 'auc': auc, 'precision': precision, 'recall': recall, 'specificity': specificity, 'f1-score': f1, 'false alarm rate': far, 'miss rate': mr, 'g': gain}
 
-def plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, **kwargs):
+def plot_detection(ts, y, c, cm, h, ave_time, **kwargs):
     default_kwargs = {'plot_ave_conf': False}
     kwargs = {**default_kwargs, **kwargs}
+    tp, fp, tn, fn = cm.ravel()
     if kwargs['plot']:
         utils.plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=h, ave_time=ave_time, **kwargs)
     if kwargs['plot_errors'] and (fp >= 1 or fn >= 1):
@@ -116,10 +129,16 @@ def plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, **kwargs):
 
 
 def run_models(X_train, X_test, y_train, y_test, **kwargs):
-    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False, 'step': 1}
+    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False, 'step': 1, 'saved_models': None}
     kwargs = {**default_kwargs, **kwargs}
-    trained_models, threshholds = train_models(
-        X_train, y_train, **kwargs)
+    if kwargs['saved_models'] is None:
+        trained_models, threshholds = train_models(
+            X_train, y_train, **kwargs)
+    else:
+        models_and_thresholds = joblib.load(kwargs['saved_models'])
+        trained_models = models_and_thresholds['models']
+        threshholds = models_and_thresholds['thresholds']
+        print('Loaded models')
     metrics_rows = []
     confidence_data = []
 
@@ -128,42 +147,36 @@ def run_models(X_train, X_test, y_train, y_test, **kwargs):
         print(f'{model_name}', end='')
         model_metrics = {'model': model_name, 'window_size': kwargs['window_size']}
         signal_time = 0
-        TP, FP, TN, FN = 0, 0, 0, 0
+        CM = np.zeros((2,2))
         confidences_for_model = {'model': model_name}
         for i, (ts, y) in enumerate(zip(X_test, y_test)):
-            if len(ts) < 120000 or len(ts) > 120001:
+            if len(ts) < 100000 or (len(ts) > 120001 and len(ts) < 300000):
                 continue
             signal_time += len(ts)
             c, ave_time = utils.sliding_window_confidence(ts, y, model, **kwargs)
             confidences_for_model[i] = c
             thresh = threshholds[model_name] if threshholds != {} else 0.5
-            tp, fp, tn, fn, h = utils.detect(
+            cm, h = utils.detect(
                 ts, y, c, confidence_thresh=thresh, **kwargs)
-            plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs) 
-            TP += tp
-            FP += fp
-            TN += tn
-            FN += fn
-        model_metrics.update(get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs)) 
+            plot_detection(ts, y, c, cm, h, ave_time, model_name=model_name, **kwargs) 
+            CM += cm
+        model_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, **kwargs)) 
         metrics_rows.append(model_metrics) 
         confidence_data.append(confidences_for_model)
         print('.', end=' ')
         confidence_df = pd.DataFrame(confidence_data)
 
     print('Ensemble', end='')
-    TP, FP, TN, FN = 0, 0, 0, 0
+    CM = np.zeros((2,2))
     ensemble_metrics = {'model': 'Ensemble', 'window_size': kwargs['window_size']}
     for i, (ts, y) in enumerate(zip(X_test, y_test)):
         if len(ts) < 120000 or len(ts) > 120001:
             continue
         c = confidence_df[i].mean()
-        tp, fp, tn, fn, h = utils.detect(ts, y, c, **kwargs)
-        plot_detection(ts, y, c, tp, fp, tn, fn, h, ave_time, model_name=model_name, **kwargs)
-        TP += tp
-        FP += fp
-        TN += tn
-        FN += fn
-    ensemble_metrics.update(get_metric_row_dict(TP, FP, TN, FN, ave_time, signal_time, **kwargs))
+        cm, h = utils.detect(ts, y, c, **kwargs)
+        plot_detection(ts, y, c, cm, h, ave_time, model_name=model_name, **kwargs)
+        CM += cm
+    ensemble_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, **kwargs))
     metrics_rows.append(ensemble_metrics)
     metrics_df = pd.DataFrame(metrics_rows)
     print('. ✅')
