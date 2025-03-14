@@ -54,51 +54,7 @@ class WorkerTransformer(BaseEstimator, TransformerMixin):
         return self.worker_model.predict_proba(X)
 
 def get_models(**kwargs):
-    # worker1_transformer = WorkerTransformer(
-    #     ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=0))
-    # worker2_transformer = WorkerTransformer(
-    #     RandomForestClassifier(n_estimators=150, random_state=0))
-    # worker3_transformer = WorkerTransformer(
-    #     RocketClassifier(random_state=0, n_jobs=-1))
-    # worker4_transformer = WorkerTransformer(
-    #     QUANTClassifier(random_state=0))
-
-    # tree_workers = FeatureUnion([
-    #     ('worker1', worker1_transformer),
-    #     ('worker2', worker2_transformer)
-    # ])
-    # ts_workers = FeatureUnion([
-    #     ('worker3', worker3_transformer),
-    #     ('worker4', worker4_transformer)
-    # ])
-    # mixed_workers = FeatureUnion([
-    #     ('worker2', worker2_transformer),
-    #     ('worker3', worker3_transformer),
-    #     ('worker4', worker4_transformer)
-    # ])
-
-    # # main pipelines
-    # TreeTS = Pipeline([
-    #     ("workers", tree_workers),     
-    #     ("scaler", StandardScaler()),
-    #     ("imputer", SimpleImputer(missing_values=np.nan, strategy='mean')),         
-    #     ("main", QUANTClassifier(random_state=0)),
-    # ])
-
-    # TSTrees = Pipeline([
-    #     ("workers", ts_workers),     
-    #     ("scaler", StandardScaler()),
-    #     ("imputer", SimpleImputer(missing_values=np.nan, strategy='mean')),         
-    #     ("main", ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=0)),
-    # ])
-
-    # MixedStack = Pipeline([
-    #     ("workers", mixed_workers),     
-    #     ("scaler", StandardScaler()),
-    #     ("imputer", SimpleImputer(missing_values=np.nan, strategy='mean')),         
-    #     ("main", ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=0)),
-    # ])
-
+    
     all_models = {
         'tabular': {
             'LogisticCV': LogisticRegressionCV(cv=5, n_jobs=-1, solver='newton-cg'),
@@ -109,12 +65,7 @@ def get_models(**kwargs):
             'Rocket': RocketClassifier(random_state=0, n_jobs=-1),
             'Catch22': Catch22Classifier(random_state=0, n_jobs=-1),
             'QUANT': QUANTClassifier(random_state=0)
-        },
-        # 'WorkerMain': {
-        #     'TreeTS': TreeTS,
-        #     'TSTree': TSTrees,
-        #     'MixedStack': MixedStack
-        #     }
+        }
     }
 
     default_kwargs = {'model_type': None, 'models_subset': None}
@@ -137,20 +88,22 @@ def cost_fn(y_true=None, y_pred=None, cm=None, **kwargs):
     Thanks to https://scikit-learn.org/stable/auto_examples/model_selection/plot_cost_sensitive_learning.html#sphx-glr-auto-examples-model-selection-plot-cost-sensitive-learning-py
     The count of true negatives is cm[0,0], false negatives is cm[1,0], true positives is cm[1,1] and false positives is cm[0,1].
     """
-    default_kwargs = {'fn_factor': 5}
+    default_kwargs = {'fn_factor': 5, 'tp_factor': 1, 'fp_factor': 1}
     kwargs = {**default_kwargs, **kwargs}
     if cm is None:
         cm = confusion_matrix(y_true, y_pred)
 
-    fn_factor=kwargs['fn_factor']
+    fn_factor = kwargs['fn_factor']
+    tp_factor = kwargs['tp_factor']
+    fp_factor = kwargs['fp_factor']
     unit_cost = 1
     fn_cost = fn_factor * unit_cost
     total_cost = unit_cost + fn_cost
     norm_fn = fn_cost / total_cost
-    norm_fp = unit_cost / total_cost
+    norm_fp = (unit_cost / total_cost) * fp_factor
 
     gain_matrix = np.array([[unit_cost, -norm_fp], # -1 gain for false alarms
-                            [-norm_fn, 2*unit_cost] # -10 gain for missed falls, 1 gain for TP
+                            [-norm_fn, tp_factor*unit_cost] # -10 gain for missed falls, 1 gain for TP
                           ])
     return np.sum(cm * gain_matrix)
 
@@ -188,9 +141,11 @@ def get_metric_row(TP, FP, TN, FN, model_name, ave_time, signal_time, **kwargs):
     metrics = {'model': model_name, 'window_size': [kwargs['window_size']],'runtime': [ave_time], 'auc': [auc], 'precision': [precision], 'recall': [recall], 'specificity': [specificity], 'f1-score': [f1], 'false alarm rate': [far], 'miss rate': [mr]}
     return pd.DataFrame(data=metrics)
 
-def get_metric_row_dict(CM, ave_time, signal_time, **kwargs):
+def get_metric_row_dict(CM, ave_time, signal_time, delays, **kwargs):
     auc, precision, recall, specificity, f1, far, mr, gain = utils.compute_metrics(CM, signal_time, **kwargs)
-    return {'runtime': ave_time, 'auc': auc, 'precision': precision, 'recall': recall, 'specificity': specificity, 'f1-score': f1, 'false alarm rate': far, 'miss rate': mr, 'g': gain}
+    delays = np.array(delays)
+    ave_delay = np.mean(delays)
+    return {'runtime': ave_time, 'auc': auc, 'precision': precision, 'recall': recall, 'specificity': specificity, 'f1-score': f1, 'false alarm rate': far, 'miss rate': mr, 'delay': ave_delay, 'g': gain}
 
 def plot_detection(ts, y, c, cm, h, ave_time, **kwargs):
     default_kwargs = {'plot_ave_conf': False}
@@ -224,6 +179,7 @@ def run_models(X_train, X_test, y_train, y_test, **kwargs):
         model_metrics = {'model': model_name, 'window_size': kwargs['window_size']}
         signal_time = 0
         CM = np.zeros((2,2))
+        delays = []
         confidences_for_model = {'model': model_name}
         for i, (ts, y) in enumerate(zip(X_test, y_test)):
             if len(ts) < 100000 or (len(ts) > 120001 and len(ts) < 300000):
@@ -232,11 +188,12 @@ def run_models(X_train, X_test, y_train, y_test, **kwargs):
             c, ave_time = utils.sliding_window_confidence(ts, y, model, **kwargs)
             confidences_for_model[i] = c
             thresh = threshholds[model_name] if threshholds != {} else 0.5
-            cm, h = utils.detect(
+            cm, h, delay = utils.detect(
                 ts, y, c, confidence_thresh=thresh, **kwargs)
+            delays.append(delay)
             plot_detection(ts, y, c, cm, h, ave_time, model_name=model_name, **kwargs) 
             CM += cm
-        model_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, **kwargs)) 
+        model_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, delays, **kwargs)) 
         metrics_rows.append(model_metrics) 
         confidence_data.append(confidences_for_model)
         print('.', end=' ')
@@ -244,15 +201,17 @@ def run_models(X_train, X_test, y_train, y_test, **kwargs):
     if kwargs['ensemble']:
         print('Ensemble', end='')
         CM = np.zeros((2,2))
+        delays = []
         ensemble_metrics = {'model': 'Ensemble', 'window_size': kwargs['window_size']}
         for i, (ts, y) in enumerate(zip(X_test, y_test)):
             if len(ts) < 120000 or len(ts) > 120001:
                 continue
             c = confidence_df[i].mean()
-            cm, h = utils.detect(ts, y, c, **kwargs)
+            cm, h, delay = utils.detect(ts, y, c, **kwargs)
+            delays.append(delay)
             plot_detection(ts, y, c, cm, h, ave_time, model_name=model_name, **kwargs)
             CM += cm
-        ensemble_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, **kwargs))
+        ensemble_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, delays, **kwargs))
         metrics_rows.append(ensemble_metrics)
     metrics_df = pd.DataFrame(metrics_rows)
     print('. ✅')

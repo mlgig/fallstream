@@ -1,11 +1,7 @@
-# Still thinking about this
-Something will come out of this, I'm sure.
+# Watch Your Step: Realistic Fall Detection in Real-world Streaming Scenarios
 
 ## Abstract
-Still very abstract
-
-## Link to full paper
-Not yet ready.
+Real-time fall detection is crucial for enabling timely interventions and mitigating the severe health consequences of falls, especially for older adults.  However, existing methods often rely on simulated data or unrealistic segmentation, hindering their real-world applicability.  Furthermore, efficient computation and robust evaluation metrics tailored to continuous monitoring are essential for practical deployment. This paper introduces a novel real-time fall detection framework that directly addresses these challenges. Leveraging over 24 hours of inertial measurement unit data from 41 participants in the FARSEEING dataset, we use efficient classifiers and a cost-sensitive learning strategy to compute fall probabilities in streaming mode without prior knowledge of fall events, optimising for a clinically relevant cost function that prioritises the timely detection of falls while minimising false alarms. In addition to evaluation on FARSEEING, we further validate our approach on a continuous 7-day real-world mobility dataset from Mobilise-D, containing three falls. Our computationally efficient method achieves an F$_1$ score of 0.92, a false alarm rate of 0.18 per hour, and a miss rate of 0.09 per hour on FARSEEING. This framework offers a significant step towards practical, real-time fall monitoring and improved fall management strategies.
 
 ## Using the Code
-Let me finish the code first please.
+Coming soon.

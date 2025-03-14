@@ -1,4 +1,5 @@
 import os
+from turtle import left
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -326,8 +327,8 @@ def plot_confidence(ts, c, y, tp, fp, tn, fn, **kwargs):
         high_conf = kwargs['high_conf']
         for i in range(len(high_conf)):
             ax.axvspan(high_conf[i], high_conf[i] + 4000, color='gray', alpha=0.3)
-    
-    ax.axvline(x=y, color='red', linestyle='--', label='Fall')
+    if y != -1:
+        ax.axvline(x=y, color='red', linestyle='--', label='Fall')
     ax.legend()
     if kwargs['title'] is not None:
         title = kwargs['title']
@@ -336,21 +337,25 @@ def plot_confidence(ts, c, y, tp, fp, tn, fn, **kwargs):
         ax.set_title(f'TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}. Time/sample: {kwargs["ave_time"]:.2f} ms. {kwargs["model_name"]}')
     plt.show()
 
-def detect(ts, fall_point, c, tolerance=20, **kwargs):
-    default_kwargs = {'confidence_thresh': 0.5}
+def detect(ts, fall_point, c, **kwargs):
+    default_kwargs = {'confidence_thresh': 0.5, 'tolerance':20}
     kwargs = {**default_kwargs, **kwargs}
     """Obtain TP, FP, TN, and FN based on confidence mapping."""
     window_size = kwargs['window_size']
     step_size = kwargs['step']
     # Get high confidence regions
     high_conf = get_high_confidence_regions(ts, c, **kwargs)
-    
+    tolerance = kwargs['tolerance']
     # n_samples = len(ts) // (kwargs['window_size']*kwargs['freq'])
     n_samples = ((len(ts) - window_size) // step_size) + 1
     TP, FP, TN, FN = 0, 0, 0, 0
-    left_all = (fall_point - 100) - 100*(window_size + tolerance)
-    right_all = (fall_point + 100*(window_size-1)) + 100*(tolerance)
-    fall_range = np.arange(left_all, right_all)
+    if fall_point==-1:
+        fall_range = np.arange(len(ts), len(ts) + 2)
+    else:
+        left_all = (fall_point - 100) - 100*(window_size + tolerance)
+        right_all = (fall_point + 100*(window_size-1)) + 100*(tolerance)
+        fall_range = np.arange(left_all, right_all)
+    delay = 0 if fall_point==-1 else tolerance
     if high_conf is None:
         TP, FP, TN, FN = 0, 0, n_samples-1, 1
     else:
@@ -359,20 +364,24 @@ def detect(ts, fall_point, c, tolerance=20, **kwargs):
             IOU = iou(detection_range, fall_range)
             if IOU != 0:
                 TP = 1
+                delay = (h - fall_point) / 100
             else:
                 FP += 1
         FN = 1 if TP == 0 else 0
         TN = n_samples - TP - FP - FN
+    FN = 0 if fall_point==-1 else FN
+    TP = 0 if fall_point==-1 else TP
     cm = np.array([[TN, FP], [FN, TP]])
     
-    return cm, high_conf
+    return cm, high_conf, delay
 
 def get_high_confidence_regions(ts, c, **kwargs):
     """Get high confidence regions based on threshold."""
 
     # Combine signal threshold and confidence threshold
     thresh = kwargs['confidence_thresh']
-    high_conf = np.where((c > thresh) | (c>=max(c)))[0]
+    # high_conf = np.where((c >= thresh) | (c>=max(c)))[0]
+    high_conf = np.where((c >= thresh))[0]
     # high_conf = np.where(c > kwargs['confidence_thresh'])[0]
     # signal_points_above_thresh = np.where(ts > kwargs['signal_thresh'])[0]
     # high_conf = np.intersect1d(high_conf_idx, signal_points_above_thresh, assume_unique=True)
