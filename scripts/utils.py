@@ -180,7 +180,7 @@ def train_test_subjects_split(dataset, **kwargs):
 def visualise_all_metrics(df, metrics, name='farseeing'):
     plt.rcParams.update({'font.size': 13})
     fig, axs = plt.subplots(2, 2, figsize=(8, 6), dpi=400,
-                            layout='constrained', sharex=True,
+                            layout='tight', sharex=True,
                             sharey='row')
     for i, metric in enumerate(metrics):
         ax = axs.flat[i]
@@ -190,7 +190,9 @@ def visualise_all_metrics(df, metrics, name='farseeing'):
         metric = 'runtime (ms)' if metric == 'runtime' else metric
         metric = 'FAR (per hour)' if metric == 'false alarm rate' else metric
         metric = 'MR (per hour)' if metric == 'miss rate' else metric
-        ax.set_title(metric)
+        # add padding to title top and reduce padding below
+        ax.set_title(metric, pad=2)
+        # ax.set_title(metric)
         ax.set_xlabel('')
         ax.set_ylabel('')
         plt.setp(ax.get_xticklabels(), rotation=60, ha='right')
@@ -361,7 +363,7 @@ def detect(ts, fall_point, c, tolerance=20, **kwargs):
                 FP += 1
         FN = 1 if TP == 0 else 0
         TN = n_samples - TP - FP - FN
-    cm = np.array([[TP, FP], [FN, TN]])
+    cm = np.array([[TN, FP], [FN, TP]])
     
     return cm, high_conf
 
@@ -370,7 +372,7 @@ def get_high_confidence_regions(ts, c, **kwargs):
 
     # Combine signal threshold and confidence threshold
     thresh = kwargs['confidence_thresh']
-    high_conf = np.where((c > thresh))[0]
+    high_conf = np.where((c > thresh) | (c>=max(c)))[0]
     # high_conf = np.where(c > kwargs['confidence_thresh'])[0]
     # signal_points_above_thresh = np.where(ts > kwargs['signal_thresh'])[0]
     # high_conf = np.intersect1d(high_conf_idx, signal_points_above_thresh, assume_unique=True)
@@ -394,10 +396,10 @@ def iou(a, b):
     union = len(set(a).union(set(b)))
     return intersection / union if union > 0 else 0
 
-def compute_metrics(cm, signal_time):
+def compute_metrics(cm, signal_time, **kwargs):
     """Compute metrics based on TP, FP, TN, FN, and signal time."""   
     # Compute metrics
-    tp, fp, fn, tn = cm.ravel()
+    tn, fp, fn, tp = cm.ravel()
     precision = np.round(tp / (tp + fp), 2) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
@@ -416,7 +418,7 @@ def compute_metrics(cm, signal_time):
     # Miss rate per hour
     mr = (fnr * total_pos_samples) / hours if hours > 0 else 0
     n_samples = np.sum(cm)
-    gain = classifiers.cost_fn(cm=cm) / n_samples if n_samples > 0 else 0
+    gain = classifiers.cost_fn(cm=cm, **kwargs) / (n_samples * 1000)
 
     return auc, precision, recall, specificity, f1, far, mr, gain
 

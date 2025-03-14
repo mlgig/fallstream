@@ -1,0 +1,2 @@
+,model,window_size,runtime,auc,precision,recall,specificity,f1-score,false alarm rate,miss rate,Dataset
+0,StackFallDetector,7.0 ± 0.0,0.64 ± 0.03,0.88 ± 0.02,0.86 ± 0.08,0.75 ± 0.05,1.0 ± 0.0,0.8 ± 0.05,0.37 ± 0.24,0.74 ± 0.14,FARSEEING

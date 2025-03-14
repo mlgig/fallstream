@@ -1,4 +1,5 @@
 import copy, joblib
+from email.policy import default
 from re import X
 import timeit
 import numpy as np, pandas as pd
@@ -22,8 +23,10 @@ from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.model_selection import train_test_split
+from sklearn.feature_selection import SelectFromModel
 from sklearn.model_selection import TunedThresholdClassifierCV
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import make_pipeline, Pipeline, FeatureUnion
+from sklearn.base import BaseEstimator, TransformerMixin
 
 from sklearn.metrics import roc_auc_score, roc_curve, auc
 from sklearn.metrics import precision_recall_fscore_support
@@ -38,44 +41,116 @@ from aeon.classification.feature_based import Catch22Classifier
 from aeon.classification.interval_based import QUANTClassifier
 from aeon.classification.convolution_based import RocketClassifier, HydraClassifier
 from aeon.classification.convolution_based import MultiRocketHydraClassifier
-from aeon.classification.deep_learning import LITETimeClassifier, ResNetClassifier
 
+class WorkerTransformer(BaseEstimator, TransformerMixin):
+    def __init__(self, worker_model):
+        self.worker_model = worker_model
+
+    def fit(self, X, y=None):
+        self.worker_model.fit(X, y)
+        return self
+
+    def transform(self, X):
+        return self.worker_model.predict_proba(X)
 
 def get_models(**kwargs):
+    # worker1_transformer = WorkerTransformer(
+    #     ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=0))
+    # worker2_transformer = WorkerTransformer(
+    #     RandomForestClassifier(n_estimators=150, random_state=0))
+    # worker3_transformer = WorkerTransformer(
+    #     RocketClassifier(random_state=0, n_jobs=-1))
+    # worker4_transformer = WorkerTransformer(
+    #     QUANTClassifier(random_state=0))
+
+    # tree_workers = FeatureUnion([
+    #     ('worker1', worker1_transformer),
+    #     ('worker2', worker2_transformer)
+    # ])
+    # ts_workers = FeatureUnion([
+    #     ('worker3', worker3_transformer),
+    #     ('worker4', worker4_transformer)
+    # ])
+    # mixed_workers = FeatureUnion([
+    #     ('worker2', worker2_transformer),
+    #     ('worker3', worker3_transformer),
+    #     ('worker4', worker4_transformer)
+    # ])
+
+    # # main pipelines
+    # TreeTS = Pipeline([
+    #     ("workers", tree_workers),     
+    #     ("scaler", StandardScaler()),
+    #     ("imputer", SimpleImputer(missing_values=np.nan, strategy='mean')),         
+    #     ("main", QUANTClassifier(random_state=0)),
+    # ])
+
+    # TSTrees = Pipeline([
+    #     ("workers", ts_workers),     
+    #     ("scaler", StandardScaler()),
+    #     ("imputer", SimpleImputer(missing_values=np.nan, strategy='mean')),         
+    #     ("main", ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=0)),
+    # ])
+
+    # MixedStack = Pipeline([
+    #     ("workers", mixed_workers),     
+    #     ("scaler", StandardScaler()),
+    #     ("imputer", SimpleImputer(missing_values=np.nan, strategy='mean')),         
+    #     ("main", ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=0)),
+    # ])
+
     all_models = {
         'tabular': {
             'LogisticCV': LogisticRegressionCV(cv=5, n_jobs=-1, solver='newton-cg'),
             'RandomForest': RandomForestClassifier(n_estimators=150, random_state=0),
-            'ExtraTrees': ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state =0),
+            'ExtraTrees': ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=0),
         },
         'ts': {
             'Rocket': RocketClassifier(random_state=0, n_jobs=-1),
             'Catch22': Catch22Classifier(random_state=0, n_jobs=-1),
             'QUANT': QUANTClassifier(random_state=0)
-        }
+        },
+        # 'WorkerMain': {
+        #     'TreeTS': TreeTS,
+        #     'TSTree': TSTrees,
+        #     'MixedStack': MixedStack
+        #     }
     }
 
     default_kwargs = {'model_type': None, 'models_subset': None}
     kwargs = {**default_kwargs, **kwargs}
 
+    collaposed_models = {**all_models['tabular'], **all_models['ts']}
+
     if kwargs['model_type'] is None: # run all models
-        models = {**all_models['tabular'], **all_models['ts']}
+        models = collaposed_models
     else: # the saner choice :-)
         models = all_models[kwargs['model_type']]
     if kwargs['models_subset'] is not None: # select model subset
-        models = {m: models[m] for m in kwargs['models_subset']}
+        models = {**all_models['tabular'], **all_models['ts']}
+        models = {m: collaposed_models[m] for m in kwargs['models_subset']}
     
     return models
 
-def cost_fn(y_true=None, y_pred=None, cm=None):
+def cost_fn(y_true=None, y_pred=None, cm=None, **kwargs):
     """
     Thanks to https://scikit-learn.org/stable/auto_examples/model_selection/plot_cost_sensitive_learning.html#sphx-glr-auto-examples-model-selection-plot-cost-sensitive-learning-py
     The count of true negatives is cm[0,0], false negatives is cm[1,0], true positives is cm[1,1] and false positives is cm[0,1].
     """
+    default_kwargs = {'fn_factor': 5}
+    kwargs = {**default_kwargs, **kwargs}
     if cm is None:
         cm = confusion_matrix(y_true, y_pred)
-    gain_matrix = np.array([[1, -1], # -1 gain for false alarms
-                            [-10, 2] # -10 gain for missed falls, 1 gain for TP
+
+    fn_factor=kwargs['fn_factor']
+    unit_cost = 1
+    fn_cost = fn_factor * unit_cost
+    total_cost = unit_cost + fn_cost
+    norm_fn = fn_cost / total_cost
+    norm_fp = unit_cost / total_cost
+
+    gain_matrix = np.array([[unit_cost, -norm_fp], # -1 gain for false alarms
+                            [-norm_fn, 2*unit_cost] # -10 gain for missed falls, 1 gain for TP
                           ])
     return np.sum(cm * gain_matrix)
 
@@ -98,6 +173,7 @@ def train_models(X_train, y_train, **kwargs):
         clf.fit(X_train, y_train)
         trained_models[model_name] = clf
         if kwargs['tune_threshold']:
+            print('Tuning threshold...')
             clf_tuned = TunedThresholdClassifierCV(
                 clf, cv=5, scoring=cost_score
                 ).fit(X_train, y_train)
@@ -108,18 +184,18 @@ def train_models(X_train, y_train, **kwargs):
     return trained_models, best_thresholds
 
 def get_metric_row(TP, FP, TN, FN, model_name, ave_time, signal_time, **kwargs):
-    auc, precision, recall, specificity, f1, far, mr = utils.compute_metrics(TP, FP, TN, FN, signal_time)
+    auc, precision, recall, specificity, f1, far, mr = utils.compute_metrics(TP, FP, TN, FN, signal_time, **kwargs)
     metrics = {'model': model_name, 'window_size': [kwargs['window_size']],'runtime': [ave_time], 'auc': [auc], 'precision': [precision], 'recall': [recall], 'specificity': [specificity], 'f1-score': [f1], 'false alarm rate': [far], 'miss rate': [mr]}
     return pd.DataFrame(data=metrics)
 
 def get_metric_row_dict(CM, ave_time, signal_time, **kwargs):
-    auc, precision, recall, specificity, f1, far, mr, gain = utils.compute_metrics(CM, signal_time)
+    auc, precision, recall, specificity, f1, far, mr, gain = utils.compute_metrics(CM, signal_time, **kwargs)
     return {'runtime': ave_time, 'auc': auc, 'precision': precision, 'recall': recall, 'specificity': specificity, 'f1-score': f1, 'false alarm rate': far, 'miss rate': mr, 'g': gain}
 
 def plot_detection(ts, y, c, cm, h, ave_time, **kwargs):
     default_kwargs = {'plot_ave_conf': False}
     kwargs = {**default_kwargs, **kwargs}
-    tp, fp, tn, fn = cm.ravel()
+    tn, fp, fn, tp = cm.ravel()
     if kwargs['plot']:
         utils.plot_confidence(ts, c, y, tp, fp, tn, fn, high_conf=h, ave_time=ave_time, **kwargs)
     if kwargs['plot_errors'] and (fp >= 1 or fn >= 1):
@@ -129,7 +205,7 @@ def plot_detection(ts, y, c, cm, h, ave_time, **kwargs):
 
 
 def run_models(X_train, X_test, y_train, y_test, **kwargs):
-    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False, 'step': 1, 'saved_models': None}
+    default_kwargs = {'cm_grid': (1,5), 'confmat_name': 'confmat', 'freq': 100, 'window_size': 60, 'verbose': 1, 'plot': False, 'plot_errors': False, 'plot_ave_conf': False, 'step': 1, 'saved_models': None, 'ensemble': True}
     kwargs = {**default_kwargs, **kwargs}
     if kwargs['saved_models'] is None:
         trained_models, threshholds = train_models(
@@ -165,19 +241,19 @@ def run_models(X_train, X_test, y_train, y_test, **kwargs):
         confidence_data.append(confidences_for_model)
         print('.', end=' ')
         confidence_df = pd.DataFrame(confidence_data)
-
-    print('Ensemble', end='')
-    CM = np.zeros((2,2))
-    ensemble_metrics = {'model': 'Ensemble', 'window_size': kwargs['window_size']}
-    for i, (ts, y) in enumerate(zip(X_test, y_test)):
-        if len(ts) < 120000 or len(ts) > 120001:
-            continue
-        c = confidence_df[i].mean()
-        cm, h = utils.detect(ts, y, c, **kwargs)
-        plot_detection(ts, y, c, cm, h, ave_time, model_name=model_name, **kwargs)
-        CM += cm
-    ensemble_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, **kwargs))
-    metrics_rows.append(ensemble_metrics)
+    if kwargs['ensemble']:
+        print('Ensemble', end='')
+        CM = np.zeros((2,2))
+        ensemble_metrics = {'model': 'Ensemble', 'window_size': kwargs['window_size']}
+        for i, (ts, y) in enumerate(zip(X_test, y_test)):
+            if len(ts) < 120000 or len(ts) > 120001:
+                continue
+            c = confidence_df[i].mean()
+            cm, h = utils.detect(ts, y, c, **kwargs)
+            plot_detection(ts, y, c, cm, h, ave_time, model_name=model_name, **kwargs)
+            CM += cm
+        ensemble_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, **kwargs))
+        metrics_rows.append(ensemble_metrics)
     metrics_df = pd.DataFrame(metrics_rows)
     print('. ✅')
     return metrics_df
