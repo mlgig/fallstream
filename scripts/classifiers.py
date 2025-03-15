@@ -12,7 +12,6 @@ sns.set_style("ticks")
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from scripts import farseeing, utils
-from scripts.utils import get_freq
 from sklearn.model_selection import KFold
 
 import matplotlib.ticker as mticker
@@ -221,68 +220,6 @@ def to_labels(pos_probs, threshold):
     # apply threshold to positive probabilities to create labels
     return (pos_probs >= threshold).astype('int')
 
-def window_from_midpoint(X, win_size):
-    h = win_size//2
-    mid = X.shape[1]//2
-    return X[:, mid-h:mid+h]
-
-def predict_eval(model, X_in=None, y_in=None, starttime=None, **kwargs):
-    target_names = ['ADL', 'Fall']
-    model_name, clf = model
-    print(f'{model_name}', end='')
-    has_proba = hasattr(clf, 'predict_proba')
-    if X_in is not None:
-        X_train, X_test = X_in
-        y_train, y_test = y_in
-    # X_train = X_train[:, :win_size]
-    # X_test = X_test[:, :win_size]
-    # select half of win_size around the middle X_train and X_test
-    # X_train = window_from_midpoint(X_train, win_size)
-    # X_test = window_from_midpoint(X_test, win_size)
-
-    print('.', end='')
-    clf.fit(X_train, y_train)
-    print('.', end='')
-    if starttime is None:
-        starttime = timeit.default_timer()
-    if has_proba:
-        probs = clf.predict_proba(X_test)[:, 1]
-        train_probs = clf.predict_proba(X_train)[:, 1]
-        auc_score = np.round(roc_auc_score(y_test, probs), 2)
-    else:
-        probs = clf.decision_function(X_test)
-        fpr, tpr, _ = roc_curve(y_test, probs)
-        auc_score = np.round(auc(fpr, tpr), 2)
-    y_pred = clf.predict(X_test)
-    runtime = (timeit.default_timer() - starttime)/X_test.shape[0]
-    runtime = np.round(runtime * 1000000) # microseconds (ms)
-    print('.', end=' ')
-    precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average='binary', zero_division=1)
-    if kwargs['verbose'] > 1:
-        print(f'{model_name} AUC: {auc_score}')
-        print(classification_report(y_test, y_pred, target_names=target_names))
-    cm = confusion_matrix(y_test, y_pred)
-    tn, fp, fn, tp = cm.ravel()
-    specificity = tn / (tn+fp)
-    return dict({'model': [model_name],
-                 'window_size': kwargs['window_size'],
-                 'runtime':[np.round(runtime, 2)],
-                 'auc': [np.round(auc_score*100, 2)],
-                 'precision':[np.round(precision*100, 2)],
-                 'recall':[np.round(recall*100, 2)],
-                 'specificity': [np.round(specificity*100, 2)],
-                 'f1-score':[np.round(f1*100, 2)]}
-                ), clf, cm
-
-def plot_cm(cm, model_name, ax, fontsize=20, colorbar=False):
-    target_names = ['ADL', 'Fall']
-    plt.rcParams.update({'font.size': fontsize})
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=target_names)
-    disp.plot(ax=ax, colorbar=colorbar)
-    # plt.grid(False)
-    plt.rcParams.update({'font.size': 10})
-
-
 def chunk_list(l, n):
     n_per_set = len(l)//n
     for i in range(1, n_per_set*n, n_per_set):
@@ -323,7 +260,7 @@ def cross_validate(dataset, **kwargs):
         rng.shuffle(subjects)
         test_sets = list(chunk_list(subjects, kwargs['cv']))
     
-    freq = get_freq(dataset)
+    freq = 100
     metrics_df = None
     
     for i, test_set in enumerate(test_sets):
@@ -343,7 +280,7 @@ def cross_validate(dataset, **kwargs):
     
     mean_df = metrics_df.groupby(['model']).mean().round(2)
     std_df = metrics_df.groupby(['model']).std().round(2)
-    cols = ['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score', 'false alarm rate', 'miss rate']
+    cols = ['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score', 'false alarm rate', 'miss rate', 'delay']
     aggr = {c: [] for c in cols}
     
     for i in mean_df.index:

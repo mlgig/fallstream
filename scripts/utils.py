@@ -1,22 +1,14 @@
 import os
-from turtle import left
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
-from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.colors as mcolors
 import matplotlib.collections as mcoll
 import matplotlib.ticker as mticker
 import seaborn as sns
 from scipy.signal import resample
-from sklearn.metrics import f1_score
-import time, timeit
+import time
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score
-from sklearn.metrics import confusion_matrix
-from sklearn.metrics import classification_report
-from sklearn.metrics import ConfusionMatrixDisplay
 from scripts import farseeing, classifiers
 
 
@@ -26,74 +18,6 @@ def magnitude(arr):
     magnitude -= min(magnitude)
     return magnitude
 
-def visualize_samples(X_train, X_test, y_train, y_test, dataset):
-    X = np.vstack(X_train, X_test)
-    y = np.vstack(y_train, y_test)
-    visualize_falls_adls(X, y, dataset=dataset)
-
-def colorlist2(c1, c2, num):
-    l = np.linspace(0, 1, num)
-    a = np.abs(np.array(c1) - np.array(c2))
-    m = np.min([c1, c2], axis=0)
-    s = np.sign(np.array(c2) - np.array(c1)).astype(int)
-    s[s == 0] = 1
-    r = np.sqrt(np.c_[(l * a[0] + m[0])[::s[0]],
-                      (l * a[1] + m[1])[::s[1]], (l * a[2] + m[2])[::s[2]]])
-    return r
-
-def color_plot(x, y):
-    ynorm = (y - y.min()) / (y.max() - y.min())
-    cmap = LinearSegmentedColormap.from_list(
-        "", colorlist2((1, 0, 0), (0, 0, 1), 100))
-    colors = [cmap(k) for k in ynorm[:-1]]
-    points = np.array([x, y]).T.reshape(-1, 1, 2)
-    segments = np.concatenate([points[:-2], points[1:-1], points[2:]], axis=1)
-    lc = LineCollection(segments, colors=colors, linewidth=2)
-    lc.set_array(x)
-    return lc
-
-def plot_all_samples(X, ax, freq=100):
-    X = np.squeeze(X) if X.ndim > 2 else X
-    # X = np.nan_to_num(X)
-    # if X.min() != -1:
-    #     X = scale(X)
-    ax.plot(X.T, color='lightblue', alpha=0.5)
-    # lc = color_plot(x, mean_vals)
-    mean_vals = X.mean(axis=0)
-    # x = np.arange(len(mean_vals))
-    # tiled = np.tile(mean_vals, (400,1))
-    # print(tiled.min(), tiled.max())
-    # print(tiled)
-    # norm = plt.Normalize(-1, 1)
-    # im = ax.imshow(tiled, cmap='coolwarm', alpha=0.5, norm=norm)
-    # ax.imshow(tiled, cmap='coolwarm', alpha=0.5, norm=norm)
-    ax.plot(mean_vals, color='blue', label='mean')
-    # ax.add_collection(lc)
-    # ax.autoscale()
-    # plt.show()
-    # return im
-
-def visualize_falls_adls(X, y, dataset="train", save=False):
-    fig, axs = plt.subplots(1, 2, figsize=(6, 2), dpi=200,
-                        sharey=True, layout='tight')
-    # remove dims with size 1
-    X = np.squeeze(X)
-    y = np.squeeze(y)
-    fallers = y.astype(bool)
-    falls = X[fallers]
-    adls = X[fallers == False]
-    plot_all_samples(adls, ax=axs[0])
-    axs[0].set_title('ADL samples')
-    axs[0].set_ylabel('Accel magnitude (g)')
-    
-    plot_all_samples(falls, ax=axs[1])
-    axs[1].set_title('Fall samples')
-    axs[1].legend()
-    if save:
-        plt.savefig(f'figs/{dataset}_mean_samples.eps', format='eps',
-                    bbox_inches='tight')
-    plt.show()
-
 def resample_to(arr, old_f, new_f=100):
     new_list = []
     old_len = arr.shape[-1]
@@ -102,14 +26,6 @@ def resample_to(arr, old_f, new_f=100):
         new_list.append(resampled)
     new_arr = np.array(new_list)
     return new_arr
-
-def get_freq(dataset):
-    if dataset==farseeing:
-        return 100
-    elif dataset==fallalld:
-        return 238
-    else:
-        return 200
 
 def single_subject_split(dataset, **kwargs):
     default_kwargs = {'test_size': 0.3, 'random_state': 0, 'visualize': False, 'clip': False, 'new_freq': None, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None}
@@ -146,15 +62,12 @@ def split_df(df, dataset, test_set, **kwargs):
     return X_train, X_test, y_train, y_test
 
 def train_test_subjects_split(dataset, **kwargs):
-    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'visualize': False, 'clip': False, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100, 'augment_data': None}
+    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'clip': False, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100, 'augment_data': None}
     kwargs = {**default_kwargs, **kwargs}
     df = dataset.load(clip=kwargs['clip'])
     subjects = df['SubjectID'].unique()
     if kwargs['split']==False:
         X, y = dataset.get_X_y(df, **kwargs)
-        # if resample:
-        #     X = resample_to(X, old_f=get_freq(dataset),
-        #                     new_f=kwargs['new_freq'])
         return X, y
     else:
         train_set, test_set = train_test_split(subjects, test_size=kwargs['test_size'], random_state=kwargs['random_state'])
@@ -162,10 +75,7 @@ def train_test_subjects_split(dataset, **kwargs):
             print(f'Test set -> {len(test_set)} of {len(subjects)} subjects: {test_set}.')
         test_df = df[df['SubjectID']==test_set[0]]
         X_train, X_test, y_train, y_test = split_df(df, dataset, test_set, **kwargs)
-        # if resample:
-        #     X_train = resample_to(X_train, old_f=get_freq(dataset), new_f=kwargs['new_freq'])
-        #     X_test = resample_to(X_test, old_f=get_freq(dataset),
-        #                          new_f=kwargs['new_freq'])
+
         print(f"Train set: X: {X_train.shape}, y: {y_train.shape}\
         ([ADLs, Falls])", np.bincount(y_train))
         if kwargs['segment_test']:
@@ -173,9 +83,7 @@ def train_test_subjects_split(dataset, **kwargs):
             ([ADLs, Falls])", np.bincount(y_test))
         else:
             print(f"Test set: X: {len(X_test)}, y: {len(y_test)}")
-        if kwargs['visualize']:
-            visualize_falls_adls(X_train, y_train)
-            visualize_falls_adls(X_test, y_test, dataset="test")
+
         return X_train, X_test, y_train, y_test
     
 def visualise_all_metrics(df, metrics, name='farseeing'):
@@ -224,74 +132,6 @@ def summary_visualization(dfs, x='model', name='models', title='', xlabel=None):
     sns.despine()
     os.makedirs('figs', exist_ok=True)  
     plt.savefig(f'figs/{name}_summary_boxplot.pdf', format='pdf', bbox_inches='tight')
-    plt.show()
-
-def ts_vs_tabular_summary(all_dfs):
-    dataset_names = ['FARSEEING', 'FallAllD', 'SisFall']
-    # add dataset names to each df
-    # concatenate all results for each dataset
-    farseeing_cv_df, farseeing_cv_df_ts, fallalld_cv_df, fallalld_cv_df_ts, sisfall_cv_df, sisfall_cv_df_ts = all_dfs
-    farseeing_all_df = pd.concat([df.assign(
-        dataset=dataset_names[0]) for df in [farseeing_cv_df.assign(type='Tabular Models'),
-        farseeing_cv_df_ts.assign(type='Time Series Models')]],
-        ignore_index=True)
-    fallalld_all_df = pd.concat([df.assign(
-        dataset=dataset_names[1]) for df in [fallalld_cv_df.assign(type='Tabular Models'),
-        fallalld_cv_df_ts.assign(type='Time Series Models')]],
-        ignore_index=True)
-    sisfall_all_df = pd.concat([df.assign(
-        dataset=dataset_names[2]) for df in [sisfall_cv_df.assign(type='Tabular Models'),
-        sisfall_cv_df_ts.assign(type='Time Series Models')]],
-        ignore_index=True)
-    all_results_df = pd.concat([farseeing_all_df, fallalld_all_df, sisfall_all_df], ignore_index=True)
-    all_results_df.to_csv('results/all_results.csv')
-    all_results_df.drop(all_results_df[all_results_df['f1-score']==0].index, inplace=True)
-    plt.rcParams.update({'font.size': 13})
-    plt.figure(figsize=(10, 3), dpi=400)
-    # plt.rcParams.update({'font.size': 16})
-    sns.boxplot(data=all_results_df, x='type', y='f1-score', hue='dataset', width=0.3)
-    # plt.xticks(rotation=45, ha='right')
-    plt.grid()
-    plt.xlabel('')
-    sns.despine()
-    plt.savefig('figs/ts_vs_tabular_boxplot_summary.eps', format='eps', bbox_inches='tight')
-    plt.show()
-
-def cross_dataset_summary(df):
-    # df = pd.concat(dfs, ignore_index=True)
-    plt.rcParams.update({'font.size': 13})
-    melted = df.drop(columns=['runtime', 'window_size', 'auc', 'specificity']).melt(
-        id_vars=["trainset", "model"])
-    
-    plt.figure(figsize=(9, 3), dpi=400)
-    order=['FARSEEING', 'FallAllD', 'FallAllD+', 'SisFall','SisFall+', 'All']
-    # melted.replace({'FallAllD+FARSEEING':'FallAllD+',
-    #                 'SisFall+FARSEEING':'SisFall+'}, inplace=True)
-    sns.boxplot(melted, x='trainset', y='value', hue='variable', width=0.5, palette="tab10", order=order)
-    plt.grid(axis='both')
-    plt.xlabel('Training Set', labelpad=10)
-    plt.ylabel('score')
-    sns.despine()
-    # plt.legend(loc=9, ncols=3)
-    plt.savefig('figs/cross_dataset_boxplot_summary.pdf', bbox_inches='tight')
-    plt.show()
-
-def plot_window_size_ablation(window_metrics=None):
-    if window_metrics is None:
-        window_metrics = pd.read_csv('results/window_size_ablation.csv')
-    fig, axs = plt.subplots(2,3, figsize=(9,4), dpi=(400),
-                        sharex='col', layout='tight')
-    titles = [f'Test time/sample ($\mu$s)', 'AUC',
-            'Precision', 'Recall', 'Specificity', f'F$_1$ score']
-    for i, col in enumerate(window_metrics.columns[2:]):
-        ax = axs.flat[i]
-        sns.lineplot(data=window_metrics, x='window_size', y=col, ax=ax)
-        ax.set_xlabel('')
-        ax.set_ylabel('')
-        ax.set_title(titles[i])
-    axs[0,0].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
-    fig.supxlabel('Total window size in seconds')
-    plt.savefig('figs/window_size_ablation.pdf', bbox_inches='tight')
     plt.show()
 
 def plot_confidence(ts, c, y, tp, fp, tn, fn, **kwargs):
@@ -431,7 +271,6 @@ def compute_metrics(cm, signal_time, **kwargs):
 
     return auc, precision, recall, specificity, f1, far, mr, gain
 
-
 def sliding_window_confidence(ts, y, model, **kwargs):
     default_kwargs = {'predict': False, 'title': None, 'label': None, 'model_name': '', 'window_size': 40, 'signal_thresh': 1.04, 'freq': 100, 'step': 1, 'method': 'max', 'pad': False} 
     kwargs = {**default_kwargs, **kwargs}
@@ -483,52 +322,8 @@ def sliding_window_confidence(ts, y, model, **kwargs):
     
     conf_map[conf_map == -np.inf] = 0  # Replace untouched values with 0 for max method
     conf_map[:len(ts) - pad_size] if pad_size else conf_map
-    # smoothen the confidence map
-    # conf_map = np.convolve(conf_map, np.ones(100)/100, mode='same')
+
     stop_time = time.time()
     total_time = 1000000*(stop_time - start_time)/conf_map.shape[0]
 
     return conf_map, total_time
-
-def compute_confidence(ts, model):
-    """Generate confidence scores for each model.
-    Over the whole signal using vectorization
-    """
-    start_time = time.time()
-    num_samples = len(ts)
-    chunk_size = 4000
-
-    # Ensure num_samples is a multiple of chunk_size
-    # pad with zeros if necessary
-    if num_samples % chunk_size != 0:
-        pad = chunk_size - num_samples % chunk_size
-        padded_ts = np.pad(ts, (0, pad), 'constant')
-    else:
-        padded_ts = ts
-
-    num_chunks = len(padded_ts) // chunk_size
-    padded_ts = padded_ts.reshape(num_chunks, chunk_size)
-    c = model.predict_proba(padded_ts)[:, 1]
-    stop_time = time.time()
-    expanded_c = np.repeat(c, chunk_size)
-    expanded_c = expanded_c[:num_samples]
-    total_time = 1000000*(stop_time - start_time)/expanded_c.shape[0]
-    return expanded_c, total_time
-
-def plot_metrics(df, x='model', pivot='f1-score', compare='metrics', **kwargs):
-    default_kwargs = {'figsize': (6,2), 'rot': 0}
-    kwargs = {**default_kwargs, **kwargs}
-    if compare=='metrics':
-        w = max(df['window_size'])
-        window_df = df[df['window_size']==w].drop(columns=['window_size', 'runtime'])
-        window_df.plot(kind='bar', x='model', **kwargs)
-    elif compare=='window_size':
-        crosstab = df.pivot_table(pivot, ['model'], 'window_size')
-        crosstab.plot(kind='bar', rot=0, **kwargs)
-        plt.grid()
-        plt.xlabel('')
-        plt.ylabel('')
-        sns.despine()
-    else:
-        df.plot(kind='bar', x='model', y=compare)
-    plt.legend(loc=9, ncol=3, bbox_to_anchor=(0.5,1.3), title=compare) 
