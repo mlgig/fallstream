@@ -61,6 +61,8 @@ def split_df(df, dataset, test_set, **kwargs):
 
     return X_train, X_test, y_train, y_test
 
+
+
 def train_test_subjects_split(dataset, **kwargs):
     default_kwargs = {'test_size': 0.3, 'random_state': 0, 'clip': False, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100, 'augment_data': None}
     kwargs = {**default_kwargs, **kwargs}
