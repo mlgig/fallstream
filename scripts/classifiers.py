@@ -1,6 +1,4 @@
 import copy, joblib
-from email.policy import default
-from re import X
 import timeit
 import numpy as np, pandas as pd
 from scipy.signal import resample
@@ -53,12 +51,15 @@ class WorkerTransformer(BaseEstimator, TransformerMixin):
         return self.worker_model.predict_proba(X)
 
 def get_models(**kwargs):
+    default_kwargs = {"model_seed": 0}
+    kwargs = {**default_kwargs, **kwargs}
+    s = kwargs['model_seed']
     
     all_models = {
         'tabular': {
-            'LogisticCV': LogisticRegressionCV(cv=5, n_jobs=-1, solver='newton-cg'),
-            'RandomForest': RandomForestClassifier(n_estimators=150, random_state=0),
-            'ExtraTrees': ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=0),
+            'LogisticCV': LogisticRegressionCV(random_state=s, cv=5, n_jobs=-1, solver='newton-cg'),
+            'RandomForest': RandomForestClassifier(n_estimators=150, random_state=s),
+            'ExtraTrees': ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=s),
         },
         'ts': {
             'Rocket': RocketClassifier(random_state=0, n_jobs=-1),
@@ -177,6 +178,7 @@ def run_models(X_train, X_test, y_train, y_test, **kwargs):
         print(f'{model_name}', end='')
         model_metrics = {'model': model_name, 'window_size': kwargs['window_size']}
         signal_time = 0
+        TOTAL_TIME = 0
         CM = np.zeros((2,2))
         delays = []
         confidences_for_model = {'model': model_name}
@@ -190,9 +192,11 @@ def run_models(X_train, X_test, y_train, y_test, **kwargs):
             cm, h, delay = utils.detect(
                 ts, y, c, confidence_thresh=thresh, **kwargs)
             delays.append(delay)
-            plot_detection(ts, y, c, cm, h, ave_time, model_name=model_name, **kwargs) 
+            plot_detection(ts, y, c, cm, h, ave_time, model_name=model_name, **kwargs)
             CM += cm
-        model_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, delays, **kwargs)) 
+            TOTAL_TIME += ave_time
+        AVE_TIME = TOTAL_TIME / len(X_test) 
+        model_metrics.update(get_metric_row_dict(CM, AVE_TIME, signal_time, delays, **kwargs)) 
         metrics_rows.append(model_metrics) 
         confidence_data.append(confidences_for_model)
         print('.', end=' ')
@@ -202,14 +206,18 @@ def run_models(X_train, X_test, y_train, y_test, **kwargs):
         CM = np.zeros((2,2))
         delays = []
         ensemble_metrics = {'model': 'Ensemble', 'window_size': kwargs['window_size']}
+        start_time = timeit.default_timer()
+        signal_time = 0
         for i, (ts, y) in enumerate(zip(X_test, y_test)):
             if len(ts) < 120000 or len(ts) > 120001:
                 continue
+            signal_time += len(ts)
             c = confidence_df[i].mean()
             cm, h, delay = utils.detect(ts, y, c, **kwargs)
             delays.append(delay)
             plot_detection(ts, y, c, cm, h, ave_time, model_name=model_name, **kwargs)
             CM += cm
+        ave_time = (timeit.default_timer() - start_time) / len(X_test)
         ensemble_metrics.update(get_metric_row_dict(CM, ave_time, signal_time, delays, **kwargs))
         metrics_rows.append(ensemble_metrics)
     metrics_df = pd.DataFrame(metrics_rows)
@@ -236,11 +244,11 @@ def get_dataset_name(dataset):
     }
     return names[dataset]
 
-def cross_validate(dataset, **kwargs):
+def cross_validate(dataset, data_subset=None, **kwargs):
     default_kwargs = {
         'model_type': None, 'models_subset': None, 'window_size': 40, 'cv': 5, 'loaded_df': None, 
         'prefall': 1, 'verbose': True, 'random_state': 0, 'multiphase': False, 
-        'thresh': 1.1, 'step': 1, 'segment_test': False, 'random_state': 0
+        'thresh': 1.1, 'step': 1, 'segment_test': False, 'model_seeds': [0],
     }
     kwargs = {**default_kwargs, **kwargs}
     dataset_name = get_dataset_name(dataset)
@@ -249,46 +257,31 @@ def cross_validate(dataset, **kwargs):
         df = dataset.load()
     else:
         df = kwargs['loaded_df']
-        
-    subjects = list(df['SubjectID'].unique())
-    # divide subjects into cv sets
+
+    if data_subset is None:
+        data_subset = list(df['SubjectID'].unique())
+
+    freq = 100
+    
     if kwargs['cv'] == 1:
-        train, test = train_test_split(subjects, test_size=0.3, random_state=kwargs['random_state'])
+        _, test = train_test_split(data_subset, test_size=0.3, random_state=kwargs['random_state'])
         test_sets = [test]
     else:
         rng = np.random.default_rng(kwargs['random_state'])
-        rng.shuffle(subjects)
-        test_sets = list(chunk_list(subjects, kwargs['cv']))
+        rng.shuffle(data_subset)
+        test_sets = list(chunk_list(data_subset, kwargs['cv']))
     
-    freq = 100
-    metrics_df = None
-    
+    DFS = []
     for i, test_set in enumerate(test_sets):
-        X_train, X_test, y_train, y_test = utils.split_df(df, dataset, test_set, **kwargs)
-        if kwargs['verbose']:
-            print(f'\n\n-- fold {i+1}, testing on ({len(test_set)} subjects) --')
-            print(f"Train set: X: {X_train.shape}, y: {y_train.shape} ([ADLs, Falls])", np.bincount(y_train))
-            print(f"Test set: X: {len(X_test)}, y: {len(y_test)}")
-        
-        if metrics_df is None:
-            metrics_df = run_models(X_train, X_test, y_train, y_test, freq=freq, **kwargs)
-            metrics_df['fold'] = i
-        else:
-            this_df = run_models(X_train, X_test, y_train, y_test, freq=freq, **kwargs)
-            this_df['fold'] = i
-            metrics_df = pd.concat([metrics_df, this_df], ignore_index=True)
+        print(f'\n-- fold {i+1}, testing on {len(test_set)} subjects --')
+        X_train, X_test, y_train, y_test = utils.split_df(df.copy(), dataset, test_set, **kwargs)
+        this_df = run_models(X_train, X_test, y_train, y_test, freq=freq, **kwargs)
+        DFS.append(this_df.assign(fold=i+1))
+    metrics_df = pd.concat(DFS, ignore_index=True)
     
-    mean_df = metrics_df.groupby(['model']).mean().round(2)
-    std_df = metrics_df.groupby(['model']).std().round(2)
-    cols = ['model', 'window_size', 'runtime', 'auc', 'precision', 'recall', 'specificity', 'f1-score', 'false alarm rate', 'miss rate', 'delay']
-    aggr = {c: [] for c in cols}
-    
-    for i in mean_df.index:
-        aggr['model'].append(i)
-        for col in cols[1:]:
-            aggr[col].append(f'{mean_df.loc[i][col]} ± {std_df.loc[i][col]}')
-    
-    aggr_df = pd.DataFrame(data=aggr)
+    cols = ['model', 'window_size', 'runtime', 'auc', 'precision', 'recall',
+            'specificity', 'f1-score', 'false alarm rate', 'miss rate', 'delay']   
+    aggr_df = utils.aggregrate_metrics(df=metrics_df, cols=cols)
     aggr_df['Dataset'] = dataset_name
     metrics_df['Dataset'] = dataset_name
     model_type = kwargs['model_type']
@@ -311,69 +304,3 @@ def boxplot(df, dataset, model_type, metric='f1-score', save=False, **kwargs):
         plt.savefig(f'figs/{dataset}_{model_type}_boxplot.eps',
                     format='eps', bbox_inches='tight')
     plt.show()
-
-def get_sample_attributions(clf, X_test, y_test, c=28, normalise=True, n=2):
-    y_pred = clf.predict(X_test)
-    true_falls = np.logical_and(y_test==1, y_pred==1)
-    false_falls = np.logical_and(y_test==0, y_pred==1)
-    true_adls = np.logical_and(y_test==0, y_pred==0)
-    false_adls = np.logical_and(y_test==1, y_pred==0)
-    tp_exp = explain_model(clf, X_test[true_falls][:n],
-                           y_test[true_falls][:n], chunks=c,
-                           normalise=normalise)
-    print(X_test[false_adls][:n].shape)
-    fp_exp = explain_model(clf, X_test[false_falls][:n],
-                           y_test[false_falls][:n], chunks=c,
-                           normalise=normalise)
-    tn_exp = explain_model(clf, X_test[true_adls][:n],
-                            y_test[true_adls][:n], chunks=c,
-                            normalise=normalise)
-    fn_exp = explain_model(clf, X_test[false_adls][:n],
-                            y_test[false_adls][:n], chunks=c,
-                            normalise=normalise)
-    tp = {'sample':X_test[true_falls][0], 'attr': tp_exp[0]}
-    fp = {'sample':X_test[false_falls][0], 'attr': fp_exp[0]}
-    tn = {'sample':X_test[true_adls][0], 'attr': tn_exp[0]}
-    fn = {'sample':X_test[false_adls][0], 'attr': fn_exp[0]}
-
-    return [tp, fp, tn, fn]
-
-def scale_arr(arr):
-    scaler = MinMaxScaler(feature_range=(-1,1))
-    return scaler.fit_transform(arr.reshape(-1,1)).flatten()
-
-def plot_sample_with_attributions(attr_dict):
-    titles = ['True Fall', 'False Alarm', 'True ADL', 'Missed Fall']
-    plt.rcParams.update({'font.size': 10})
-    cmap = plt.get_cmap('coolwarm')
-    attributions = copy.deepcopy(attr_dict)
-    for i, (model_name, exps) in enumerate(attributions.items()):
-        fig, axs = plt.subplots(2, 2, figsize=(10, 5), dpi=400,
-                            sharey='row', sharex='col', layout='constrained')
-        fig.suptitle(model_name)
-        for e, exp in enumerate(exps):
-            ax = axs.flat[e]
-            ax.set_title(titles[e])
-            y = scale_arr(exp['sample'])
-            x = np.arange(len(y))
-            c = exp['attr'].flatten()
-            ax.plot(c, linestyle=':', label='attribution profile', alpha=0.35)
-            # Normalize the color values
-            norm = mcolors.Normalize(vmin=-1, vmax=1)
-            for j in range(len(x)-1):
-                ax.plot(x[j:j+2], y[j:j+2], color=cmap(norm(c[j])), linewidth=1.5, label='normalised sample' if j==0 else None)
-            ticks_loc = ax.get_xticks().tolist()
-            ax.xaxis.set_major_locator(mticker.FixedLocator(ticks_loc))
-            ax.set_xticklabels([i//100 for i in ticks_loc])
-            # ax.grid(which='both', axis='x')     
-        axs[1,1].legend()
-        fig.supylabel('Attribution score')
-        # Adding color bar to show the color scale
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        cax = plt.axes((1.01, 0.05, 0.015, 0.92))
-        plt.colorbar(sm, cax=cax)
-        fig.supxlabel('Time in seconds')
-        # sns.despine()
-        plt.savefig(f'figs/{model_name}_explanation.pdf', bbox_inches='tight')
-        plt.show()

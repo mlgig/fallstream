@@ -7,6 +7,7 @@ import matplotlib.collections as mcoll
 import matplotlib.ticker as mticker
 import seaborn as sns
 from scipy.signal import resample
+from typing import Sequence, Tuple
 import time
 from sklearn.model_selection import train_test_split
 from scripts import farseeing, classifiers
@@ -48,45 +49,64 @@ def single_subject_split(dataset, **kwargs):
         subject_splits[subject] = (X_train, X_test, y_train, y_test)
     return subject_splits
 
-def split_df(df, dataset, test_set, **kwargs):
-    test_df = df[df['SubjectID']==test_set[0]]
-    train_df = df.drop(df[df['SubjectID']==test_set[0]].index)
-    for id in test_set[1:]:
-        this_df = df[df['SubjectID']==id]
-        test_df = pd.concat([test_df, this_df], ignore_index=True)
-        df.drop(this_df.index, inplace=True)
-        df.reset_index().drop(columns=['index'], inplace=True)
-    X_train, y_train = dataset.get_X_y(df, **kwargs)
+def split_df(
+        df: pd.DataFrame,
+        dataset,
+        test_set: Sequence[int],
+        **kwargs: dict
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Create subject-wise train / test splits **without modifying ``df`` in-place**.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing the data to split. Must contain a column
+        named 'SubjectID' with subject IDs.
+    dataset : Dataset
+    test_set : Sequence[int]
+        List/array of subject IDs to place in the test fold.
+    *remaining kwargs*
+        Passed straight through to ``dataset.get_X_y``.
+    """
+
+    default_kwargs = {'random_state': 0, 'clip': False, 'split': True,
+                      'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100, 'augment_data': None}
+
+    kwargs = {**default_kwargs, **kwargs}
+    if not kwargs['split']:
+        X, y = dataset.get_X_y(df, **kwargs)
+        return X, y
+    
+    test_mask = df['SubjectID'].isin(test_set)
+    train_mask = ~test_mask
+    train_df = df.loc[train_mask].reset_index(drop=True)
+    test_df = df.loc[test_mask].reset_index(drop=True)
+    print(f"Train set: {len(train_df)} samples, Test set: {len(test_df)} samples")
+    X_train, y_train = dataset.get_X_y(train_df, **kwargs)
     X_test, y_test = dataset.get_X_y(test_df, keep_fall=True, **kwargs)
 
+    print(f"Train set: X: {X_train.shape}, y: {y_train.shape}\
+    ([ADLs, Falls])", np.bincount(y_train))
+    if kwargs['segment_test']:
+        print(f"Test set: X: {X_test.shape}, y: {y_test.shape}\
+        ([ADLs, Falls])", np.bincount(y_test))
+    else:
+        print(f"Test set: X: {len(X_test)}, y: {len(y_test)}")
     return X_train, X_test, y_train, y_test
 
 
-
 def train_test_subjects_split(dataset, **kwargs):
-    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'clip': False, 'split': True, 'show_test': False, 'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100, 'augment_data': None}
+    default_kwargs = {'test_size': 0.3, 'random_state': 0, 'clip': False, 'show_test': True, 'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100, 'augment_data': None}
     kwargs = {**default_kwargs, **kwargs}
     df = dataset.load(clip=kwargs['clip'])
     subjects = df['SubjectID'].unique()
-    if kwargs['split']==False:
-        X, y = dataset.get_X_y(df, **kwargs)
-        return X, y
-    else:
-        train_set, test_set = train_test_split(subjects, test_size=kwargs['test_size'], random_state=kwargs['random_state'])
-        if kwargs['show_test']:
-            print(f'Test set -> {len(test_set)} of {len(subjects)} subjects: {test_set}.')
-        test_df = df[df['SubjectID']==test_set[0]]
-        X_train, X_test, y_train, y_test = split_df(df, dataset, test_set, **kwargs)
 
-        print(f"Train set: X: {X_train.shape}, y: {y_train.shape}\
-        ([ADLs, Falls])", np.bincount(y_train))
-        if kwargs['segment_test']:
-            print(f"Test set: X: {X_test.shape}, y: {y_test.shape}\
-            ([ADLs, Falls])", np.bincount(y_test))
-        else:
-            print(f"Test set: X: {len(X_test)}, y: {len(y_test)}")
+    train_set, test_set = train_test_split(subjects, test_size=kwargs['test_size'], random_state=kwargs['random_state'])
+    if kwargs['show_test']:
+        print(f'Hold-out test set -> {len(test_set)} of {len(subjects)} subjects: {test_set}.')  
 
-        return X_train, X_test, y_train, y_test
+    return train_set, test_set
     
 def visualise_all_metrics(df, metrics, name='farseeing'):
     plt.rcParams.update({'font.size': 13})
@@ -180,7 +200,7 @@ def plot_confidence(ts, c, y, tp, fp, tn, fn, **kwargs):
     plt.show()
 
 def detect(ts, fall_point, c, **kwargs):
-    default_kwargs = {'confidence_thresh': 0.5, 'tolerance':20}
+    default_kwargs = {'confidence_thresh': 0.5, 'tolerance':20, 'step': 1}
     kwargs = {**default_kwargs, **kwargs}
     """Obtain TP, FP, TN, and FN based on confidence mapping."""
     window_size = kwargs['window_size']
@@ -329,3 +349,13 @@ def sliding_window_confidence(ts, y, model, **kwargs):
     total_time = 1000000*(stop_time - start_time)/conf_map.shape[0]
 
     return conf_map, total_time
+
+def aggregrate_metrics(df, cols):
+    mean_df = df.groupby(['model']).mean().round(2)
+    std_df = df.groupby(['model']).std().round(2)
+    aggr = {c: [] for c in cols}
+    for i in mean_df.index:
+        aggr['model'].append(i)
+        for col in cols[1:]:
+            aggr[col].append(f'{mean_df.loc[i][col]} ± {std_df.loc[i][col]}')
+    return pd.DataFrame(data=aggr)
