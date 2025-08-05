@@ -12,7 +12,8 @@ DEFAULT_STEP_S = 1             # seconds
 __all__ = ["get_X_y"]
 
 def load(clip=False):
-    farseeing = pd.read_pickle(r'data/farseeing.pkl').reset_index().drop(columns=['index'])
+    # farseeing = pd.read_pickle(r'data/farseeing.pkl').reset_index().drop(columns=['index'])
+    farseeing = pd.read_feather("data/farseeing.feather")
     return farseeing
 
 def _window_view(arr: np.ndarray, win: int, step: int) -> np.ndarray:
@@ -37,7 +38,7 @@ def get_X_y(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Vectorised sampling function for FARSEEING dataset."""
 
-    win_len_target   = window_size * FREQ_TARGET
+    win_len_target = int(window_size * FREQ_TARGET)
     step_len  = step * FREQ_TARGET
 
     if multiphase:
@@ -72,8 +73,8 @@ def get_X_y(
             continue
 
         # window lengths at *native* sampling rate
-        orig_win  = window_size * freq
-        orig_step = step       * freq
+        orig_win  = int(window_size * freq)
+        orig_step = step  * freq
 
         win_list, y_list = [], []
 

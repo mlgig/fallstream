@@ -200,7 +200,7 @@ def plot_confidence(ts, c, y, tp, fp, tn, fn, **kwargs):
     plt.show()
 
 def detect(ts, fall_point, c, **kwargs):
-    default_kwargs = {'confidence_thresh': 0.5, 'tolerance':20, 'step': 1}
+    default_kwargs = {'confidence_thresh': 0.5, 'tolerance':20, 'step': 1, 'const_confidence': False}
     kwargs = {**default_kwargs, **kwargs}
     """Obtain TP, FP, TN, and FN based on confidence mapping."""
     window_size = kwargs['window_size']
@@ -209,30 +209,40 @@ def detect(ts, fall_point, c, **kwargs):
     high_conf = get_high_confidence_regions(ts, c, **kwargs)
     tolerance = kwargs['tolerance']
     # n_samples = len(ts) // (kwargs['window_size']*kwargs['freq'])
-    n_samples = ((len(ts) - window_size) // step_size) + 1
-    TP, FP, TN, FN = 0, 0, 0, 0
-    if fall_point==-1:
-        fall_range = np.arange(len(ts), len(ts) + 2)
+    n_samples = int((len(ts) - window_size) // step_size) + 1
+    const_conf = kwargs.get('const_confidence', False)
+    if const_conf:
+        N = int(len(ts) // window_size)
+        if const_conf == 1:
+            TP, FP, TN, FN = 1, N - 1, 0, 0
+        else:
+            TP, FP, TN, FN = 0, N - 1, 1, 0
+        high_conf = np.array([0]) if const_conf == 1 else np.array([])
+        delay = 0
     else:
-        left_all = (fall_point - 100) - 100*(window_size + tolerance)
-        right_all = (fall_point + 100*(window_size-1)) + 100*(tolerance)
-        fall_range = np.arange(left_all, right_all)
-    delay = 0 if fall_point==-1 else tolerance
-    if high_conf is None:
-        TP, FP, TN, FN = 0, 0, n_samples-1, 1
-    else:
-        for h in high_conf:
-            detection_range = range(h, h + 100*(window_size + tolerance))
-            IOU = iou(detection_range, fall_range)
-            if IOU != 0:
-                TP = 1
-                delay = (h - fall_point) / 100
-            else:
-                FP += 1
-        FN = 1 if TP == 0 else 0
-        TN = n_samples - TP - FP - FN
-    FN = 0 if fall_point==-1 else FN
-    TP = 0 if fall_point==-1 else TP
+        TP, FP, TN, FN = 0, 0, 0, 0
+        if fall_point==-1:
+            fall_range = np.arange(len(ts), len(ts) + 2)
+        else:
+            left_all = (fall_point - 100) - int(100*(window_size + tolerance))
+            right_all = (fall_point + int(100*(window_size-1))) + int(100*(tolerance))
+            fall_range = np.arange(left_all, right_all)
+        delay = 0 if fall_point==-1 else tolerance
+        if high_conf is None:
+            TP, FP, TN, FN = 0, 0, n_samples-1, 1
+        else:
+            for h in high_conf:
+                detection_range = range(h, h + int(100*(window_size + tolerance)))
+                IOU = iou(detection_range, fall_range)
+                if IOU != 0:
+                    TP = 1
+                    delay = (h - fall_point) / 100
+                else:
+                    FP += 1
+            FN = 1 if TP == 0 else 0
+            TN = n_samples - TP - FP - FN
+        FN = 0 if fall_point==-1 else FN
+        TP = 0 if fall_point==-1 else TP
     cm = np.array([[TN, FP], [FN, TP]])
     
     return cm, high_conf, delay
@@ -294,7 +304,7 @@ def compute_metrics(cm, signal_time, **kwargs):
     return auc, precision, recall, specificity, f1, far, mr, gain
 
 def sliding_window_confidence(ts, y, model, **kwargs):
-    default_kwargs = {'predict': False, 'title': None, 'label': None, 'model_name': '', 'window_size': 40, 'signal_thresh': 1.04, 'freq': 100, 'step': 1, 'method': 'max', 'pad': False} 
+    default_kwargs = {'predict': False, 'title': None, 'label': None, 'model_name': '', 'window_size': 40, 'signal_thresh': 1.04, 'freq': 100, 'step': 1, 'method': 'max', 'pad': False, 'const_confidence': False} 
     kwargs = {**default_kwargs, **kwargs}
     method = kwargs['method']
     pad = kwargs['pad']
@@ -313,37 +323,39 @@ def sliding_window_confidence(ts, y, model, **kwargs):
     conf_map = np.zeros(n, dtype=np.float32) if method == 'mean' else np.full(n, -np.inf, dtype=np.float32)
     count_map = np.zeros(n, dtype=np.uint16) if method == 'mean' else None
     
-    confidence_scores = []
-    indices = []
-    X = []
-    for start in range(0, n - window_size + 1, step):
-        end = start + window_size
-        if end > n:
-            break  # Ensure we don't exceed array bounds
-        window = np.array(ts[start:end]).reshape(1, -1)
-        # filter out windows with max < signal_thresh
-        # f1 = int(freq*kwargs['prefall']) if 'prefall' in kwargs and kwargs['prefall'] is not None else freq
-        # f2 = f1 + freq
-        above_thresh = np.max(window) >= signal_thresh
-        indices.append((start, end, above_thresh))
-        X.append(window)
-    
-    if X:
-        confidence_scores = model.predict_proba(np.vstack(X))[:, 1]  
-    
-        for (start, end, above_thresh), score in zip(indices, confidence_scores):
-            if method == 'max' and above_thresh:
-                conf_map[start:end] = np.maximum(conf_map[start:end], score)
-            elif method == 'mean' and above_thresh:
-                conf_map[start:end] += score
-                count_map[start:end] += 1
-    
-    if method == 'mean':
-        nonzero_indices = count_map > 0
-        conf_map[nonzero_indices] /= count_map[nonzero_indices]
-    
-    conf_map[conf_map == -np.inf] = 0  # Replace untouched values with 0 for max method
-    conf_map[:len(ts) - pad_size] if pad_size else conf_map
+    if kwargs['const_confidence']:
+        conf_map.fill(kwargs['const_confidence'])
+    else:
+        confidence_scores = []
+        indices = []
+        X = []
+        for start in range(0, n - window_size + 1, step):
+            end = start + window_size
+            if end > n:
+                break  # Ensure we don't exceed array bounds
+            window = np.array(ts[start:end]).reshape(1, -1)
+            # filter out windows with max < signal_thresh
+            # f1 = int(freq*kwargs['prefall']) if 'prefall' in kwargs and kwargs['prefall'] is not None else freq
+            # f2 = f1 + freq
+            above_thresh = np.max(window) >= signal_thresh
+            indices.append((start, end, above_thresh))
+            X.append(window)
+        
+        if X:
+            confidence_scores = model.predict_proba(np.vstack(X))[:, 1]  
+            for (start, end, above_thresh), score in zip(indices, confidence_scores):
+                if method == 'max' and above_thresh:
+                    conf_map[start:end] = np.maximum(conf_map[start:end], score)
+                elif method == 'mean' and above_thresh:
+                    conf_map[start:end] += score
+                    count_map[start:end] += 1
+        
+        if method == 'mean':
+            nonzero_indices = count_map > 0
+            conf_map[nonzero_indices] /= count_map[nonzero_indices]
+        
+        conf_map[conf_map == -np.inf] = 0  # Replace untouched values with 0 for max method
+    conf_map = conf_map[:len(ts) - pad_size] if pad_size else conf_map
 
     stop_time = time.time()
     total_time = 1000000*(stop_time - start_time)/conf_map.shape[0]

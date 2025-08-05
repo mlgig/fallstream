@@ -1,44 +1,47 @@
 from __future__ import annotations
 
 from typing import List, Sequence
-
+import numpy as np
 from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
-from aeon.classification.convolution_based import RocketClassifier
+from aeon.classification.convolution_based import MiniRocketClassifier
 from aeon.classification.feature_based import Catch22Classifier
 from aeon.classification.interval_based import QUANTClassifier
+from aeon.classification.deep_learning import ResNetClassifier
 from sklearn.base import BaseEstimator, clone
 
 from scripts.model_spec import ModelSpec
+from scripts.baselines import AlwaysADL, AlwaysFall
+from tensorflow import keras
+from tensorflow.keras.callbacks import EarlyStopping
 
+early_stop = EarlyStopping(
+    monitor="loss",
+    patience=20,
+    min_delta=1e-4,
+    restore_best_weights=True
+)
 
 _TEMPLATE_SPECS: List[ModelSpec] = [
     ModelSpec(
-        name="LogisticCV",
-        estimator=make_pipeline(
-            StandardScaler(),
-            SimpleImputer(strategy="mean"),
-            LogisticRegressionCV(cv=5, solver="newton-cg"),
-        ),
-        kind="tabular",
+        name="DummyADL",
+        estimator=AlwaysADL,
+        kind="baseline",
     ),
     ModelSpec(
-        name="RandomForest",
-        estimator=make_pipeline(
-            StandardScaler(),
-            SimpleImputer(strategy="mean"),
-            RandomForestClassifier(n_estimators=150),
-        ),
-        kind="tabular",
+        name="DummyFall",
+        estimator=AlwaysFall,
+        kind="baseline",
     ),
     ModelSpec(
         name="ExtraTrees",
         estimator=make_pipeline(
             StandardScaler(),
-            SimpleImputer(strategy="mean"),
+            SimpleImputer(strategy="mean", 
+                          missing_values=np.nan),
             ExtraTreesClassifier(
                 n_estimators=150,
                 max_features=0.1,
@@ -48,31 +51,39 @@ _TEMPLATE_SPECS: List[ModelSpec] = [
         kind="tabular",
     ),
     ModelSpec(
-        name="Rocket",
+        name="MiniRocket",
         estimator=make_pipeline(
-            StandardScaler(),
-            SimpleImputer(strategy="mean"),
-            RocketClassifier(n_jobs=-1)
+            SimpleImputer(strategy="mean", missing_values=np.nan),
+            MiniRocketClassifier(n_jobs=-1)
         ),
         kind="ts",
     ),
     ModelSpec(
         name="Catch22",
         estimator=make_pipeline(
-            StandardScaler(),
-            SimpleImputer(strategy="mean"),
-            Catch22Classifier(n_jobs=-1)
+            SimpleImputer(strategy="mean", missing_values=np.nan),
+            Catch22Classifier()
         ),
         kind="ts",
     ),
     ModelSpec(
         name="QUANT",
         estimator=make_pipeline(
-            StandardScaler(),
-            SimpleImputer(strategy="mean"),
+            SimpleImputer(strategy="mean", missing_values=np.nan),
             QUANTClassifier()
         ),
         kind="ts",
+    ),
+    ModelSpec(
+        name="ResNet",
+        estimator=make_pipeline(
+            SimpleImputer(strategy="mean", missing_values=np.nan),
+            ResNetClassifier(
+                metrics=[keras.metrics.F1Score()],
+                file_path="./.keras",
+                callbacks=[early_stop])
+        ),
+        kind="dl",
     )
 ]
 

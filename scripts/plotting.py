@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import test
 """Reusable plotting helpers with a unified seaborn / matplotlib style."""
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -9,15 +11,19 @@ import numpy as np
 from matplotlib.axes import Axes
 from typing import Sequence
 import pandas as pd
+from aeon.visualisation import plot_critical_difference as cd
 
 sns.set_theme(style="ticks", font_scale=1.1)
 
-__all__ = ["metric_box", "compare_models", "metric_grid"]
+__all__ = ["metric_box", "compare_models", "metric_grid", 
+           "plot_confidence", "plot_detection", "critical_difference", "window_bar"]
 
-def metric_box(df: pd.DataFrame, metric: str, *, order=None, title=None, ax: Axes | None = None, grid_ax=None):
+def metric_box(df: pd.DataFrame, metric: str, *, x="model",
+               hue=None, order=None, title=None,
+               ax: Axes | None = None, grid_ax=None):
     """Box‑plot of *metric* by model. Returns the Axes for further tweaking."""
     ax = ax or plt.gca()
-    sns.boxplot(data=df, x="model", y=metric, order=order, ax=ax, width=.4, palette='tab10')
+    sns.boxplot(data=df, x=x, y=metric, order=order, hue=hue, ax=ax, width=.5, palette='tab10')
     ax.set_xlabel("")
     ax.set_ylabel(metric)
     ax.set_title(title or metric)
@@ -45,6 +51,7 @@ def metric_grid(
     n_cols: int = 2,
     fig_size: tuple[int, int] | None = None,
     suptitle: str | None = None,
+    **kwargs
 ):
     """Display many metrics for one dataset in a tidy grid.
 
@@ -77,7 +84,7 @@ def metric_grid(
     axs = axs.flatten() if isinstance(axs, (list, np.ndarray)) else [axs]
 
     for ax, metric in zip(axs, metrics):
-        metric_box(df, metric, order=order, ax=ax)
+        metric_box(df, metric, order=order, ax=ax, **kwargs)
         ax.set_title(metric)
     # Empty axes in last row if metrics % n_cols != 0
     for ax in axs[len(metrics):]:
@@ -190,3 +197,83 @@ def plot_detection(
             ave_time=ave_time,
             **cfg,
         )
+
+def critical_difference(
+    df: pd.DataFrame,
+    metric: str = "f1-score",
+    pivot_column: str = "model",
+    *,
+    alpha: float = 0.05,
+    title: str | None = None,
+    save: str | None = None,
+):
+    """
+    Draw a Demšar critical-difference diagram for one metric.
+
+    Parameters
+    ----------
+    df      : CV table with columns  fold, model, <metric>
+    metric  : which column to rank (higher = better)
+    alpha   : significance level for Nemenyi test
+    title   : figure title
+    save    : path to save (PDF/PNG).  If None, no file is written.
+    """
+    pivot = (
+        df.pivot_table(index="fold", columns=pivot_column, values=metric, aggfunc="median")
+    )
+
+    methods = pivot.columns.tolist()
+    results = pivot.values
+
+    cd(results, methods, alpha=alpha)
+    plt.title(title or f"CD diagram – {metric}  (α={alpha})")
+    if save:
+        plt.savefig(save, bbox_inches="tight")
+    plt.show()
+
+def window_bar(
+    df: pd.DataFrame,
+    metric: str = "f1-score",
+    x: str = "window_size",
+    hue: str = "model",
+    *,
+    order: Sequence[int] | None = None,
+    ci: str | float | None = "sd",
+    palette: str | Sequence[str] = "tab10",
+    ax: plt.Axes | None = None,
+    title: str | None = None,
+    legend_out: bool = True,
+):
+    """
+    Grouped bar-plot: one group per window, coloured bars per model.
+
+    Parameters
+    ----------
+    df      : DataFrame with *window_size*, *model*, <metric>, *fold*
+    metric  : column to plot
+    order   : explicit x-axis order of window sizes
+    ci      : 'sd', 'se', numeric (e.g. 95) or None  (seaborn style)
+    legend_out : place legend outside plot on the right
+    """
+    ax = ax or plt.gca()
+    sns.barplot(
+        data=df,
+        x=x,
+        y=metric,
+        hue=hue,
+        order=order,
+        ci=ci,
+        palette=palette,
+        capsize=.12,
+        ax=ax,
+        errwidth=1,
+    )
+    ax.set_xlabel("Window size (s)")
+    ax.set_ylabel(metric)
+    ax.set_title(title or f"{metric} by window and model")
+    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+    sns.despine()
+
+    if legend_out:
+        ax.legend(title=hue, bbox_to_anchor=(1.02, 1), loc="upper left")
+    return ax

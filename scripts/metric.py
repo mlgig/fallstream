@@ -36,8 +36,7 @@ register(Metric("miss rate", lambda tp, fp, tn, fn, signal_time, **__:
 register(Metric(
     "gain",
     lambda tp, fp, tn, fn, *_:
-        cost_fn(cm=np.array([[tn, fp], [fn, tp]])) /
-        ((np.sum([tp, fp, tn, fn]) or 1) * 1000),
+        cost_fn(cm=np.array([[tn, fp], [fn, tp]])) / 360_000, # per hour
     "Gain"
 ))
 

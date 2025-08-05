@@ -1,4 +1,5 @@
 from __future__ import annotations
+from curses import window
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, List, Mapping, Sequence
 import logging
@@ -7,6 +8,7 @@ import copy
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit
+from scripts.shuffled_group_kfold import ShuffledGroupKFold
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,7 @@ class CVRunner:
                 self.dataset,
                 test_subjects,
                 random_state=self.random_state,
+                window_size=self.window_size,
                 **self.kwargs
             )
 
@@ -103,6 +106,7 @@ class CVRunner:
                 y_te,
                 freq=getattr(self.dataset, "freq", 100),
                 model_seeds=seeds,
+                window_size=self.window_size,
                 **self.kwargs,
                 **run_kwargs,
             )
