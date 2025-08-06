@@ -188,3 +188,28 @@
 2025-08-06 00:51:14,211 [INFO] Training models (seed=0)
 2025-08-06 00:51:25,060 [INFO] Training models (seed=1)
 2025-08-06 00:51:35,951 [INFO] Training models (seed=2)
+2025-08-06 00:54:17,097 [INFO] ✅ Evaluation complete
+2025-08-06 00:54:17,102 [INFO] Training models (seed=0)
+2025-08-06 00:54:18,137 [INFO] Training models (seed=1)
+2025-08-06 00:54:18,688 [INFO] Training models (seed=2)
+2025-08-06 00:54:28,473 [INFO] ✅ Evaluation complete
+2025-08-06 00:54:28,476 [INFO] Training models (seed=0)
+2025-08-06 00:54:31,949 [INFO] Training models (seed=1)
+2025-08-06 00:54:35,364 [INFO] Training models (seed=2)
+2025-08-06 00:54:43,274 [INFO] ✅ Evaluation complete
+2025-08-06 00:54:43,276 [INFO] Training models (seed=0)
+2025-08-06 00:55:00,775 [INFO] Catch22: threshold tuned to 0.38
+2025-08-06 00:55:51,489 [INFO] QUANT: threshold tuned to 0.41
+2025-08-06 00:55:51,491 [INFO] Training models (seed=1)
+2025-08-06 00:56:02,450 [INFO] Training models (seed=2)
+2025-08-06 00:59:03,827 [INFO] ✅ Evaluation complete
+2025-08-06 00:59:03,830 [INFO] Training models (seed=0)
+2025-08-06 00:59:08,452 [INFO] MiniRocket: threshold tuned to 0.01
+2025-08-06 00:59:08,454 [INFO] Training models (seed=1)
+2025-08-06 00:59:09,000 [INFO] Training models (seed=2)
+2025-08-06 00:59:18,809 [INFO] ✅ Evaluation complete
+2025-08-06 00:59:18,811 [INFO] Training models (seed=0)
+2025-08-06 00:59:39,085 [INFO] ExtraTrees: threshold tuned to 0.48
+2025-08-06 00:59:39,087 [INFO] Training models (seed=1)
+2025-08-06 00:59:42,516 [INFO] Training models (seed=2)
+2025-08-06 00:59:50,222 [INFO] ✅ Evaluation complete
