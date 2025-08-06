@@ -53,6 +53,7 @@ _TEMPLATE_SPECS: List[ModelSpec] = [
     ModelSpec(
         name="MiniRocket",
         estimator=make_pipeline(
+            StandardScaler(),
             SimpleImputer(strategy="mean", missing_values=np.nan),
             MiniRocketClassifier(n_jobs=-1)
         ),
@@ -61,6 +62,7 @@ _TEMPLATE_SPECS: List[ModelSpec] = [
     ModelSpec(
         name="Catch22",
         estimator=make_pipeline(
+            StandardScaler(),
             SimpleImputer(strategy="mean", missing_values=np.nan),
             Catch22Classifier()
         ),
@@ -69,6 +71,7 @@ _TEMPLATE_SPECS: List[ModelSpec] = [
     ModelSpec(
         name="QUANT",
         estimator=make_pipeline(
+            StandardScaler(),
             SimpleImputer(strategy="mean", missing_values=np.nan),
             QUANTClassifier()
         ),

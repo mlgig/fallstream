@@ -12,7 +12,7 @@ def cost_fn(
     # costs side (sums to 1)
     fn_cap: float = 10.0,      
     imbalance_mode: str = "log",  # {"log", "sqrt", "ratio"}
-    normalise: bool = False,    
+    normalise: bool = True,    
 ):
     """
     Utility = (+TN * tn_gain + TP * tp_gain) - (FP * fp_cost + FN * fn_cost)

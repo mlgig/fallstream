@@ -271,7 +271,7 @@ def window_bar(
     ax.set_xlabel("Window size (s)")
     ax.set_ylabel(metric)
     ax.set_title(title or f"{metric} by window and model")
-    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+    # plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
     sns.despine()
 
     if legend_out:
