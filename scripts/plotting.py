@@ -12,6 +12,9 @@ from matplotlib.axes import Axes
 from typing import Sequence
 import pandas as pd
 from aeon.visualisation import plot_critical_difference as cd
+from sklearn.metrics import make_scorer, precision_score, recall_score, confusion_matrix
+from sklearn.metrics import PrecisionRecallDisplay, RocCurveDisplay
+
 
 sns.set_theme(style="ticks", font_scale=1.1)
 
@@ -277,3 +280,208 @@ def window_bar(
     if legend_out:
         ax.legend(title=hue, bbox_to_anchor=(1.02, 1), loc="upper left")
     return ax
+
+def plot_grouped_stacked(
+    real_df, dummy_df, metrics,
+    figsize=(7, 5), dpi=300, save_path=None
+):
+    """
+    Plot grouped bar chart for improvement vs DummyADL and stacked tuning effect.
+    Negative region is shaded light red.
+    """
+
+    records = []
+    for model, g in real_df.groupby("model"):
+        base = g.query("thresh==0.5")
+        tuned = g.query("thresh!=0.5")
+        dummy_base = dummy_df.query("thresh==0.5")
+
+        for m in metrics:
+            v0 = base[m].values[0]
+            vd = dummy_base[m].values[0]
+            v1 = tuned[m].values[0] if not tuned.empty else v0
+
+            base_improv = 100 * (v0 - vd) / vd  # improvement vs DummyADL
+            tuning_effect = 100 * (v1 - v0) / v0  # change from tuning
+
+            records.append({
+                "model": model,
+                "metric": m,
+                "base_improvement": base_improv,
+                "tuning_effect": tuning_effect
+            })
+
+    df = pd.DataFrame(records)
+
+    # Sort models by average base improvement
+    model_order = df.groupby("model")["base_improvement"].mean().sort_values().index
+    df["model"] = pd.Categorical(df["model"], categories=model_order, ordered=True)
+
+    # Set up plot
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    palette = dict(zip(metrics, sns.color_palette("tab10", n_colors=len(metrics))))
+    bar_width = 0.35
+    x = np.arange(len(model_order))
+
+    # Shade negative region
+    ax.axhspan(ax.get_ylim()[0], 0, facecolor="mistyrose", alpha=0.4, zorder=0)
+
+    for i, metric in enumerate(metrics):
+        subdf = df[df["metric"] == metric].sort_values("model")
+        base_vals = subdf["base_improvement"].values
+        tuning_vals = subdf["tuning_effect"].values
+
+        # Base bars
+        ax.bar(
+            x + (i - 0.5) * bar_width, base_vals, width=bar_width,
+            color=palette[metric], label=metric if i == 0 else "", zorder=2
+        )
+
+        # Stacked tuning effect
+        bottoms = base_vals * (tuning_vals >= 0)
+        ax.bar(
+            x + (i - 0.5) * bar_width, tuning_vals, width=bar_width,
+            bottom=bottoms, color=palette[metric], alpha=0.5, zorder=3
+        )
+
+        # Annotate tuning effect
+        for xi, b, t in zip(x, base_vals, tuning_vals):
+            ax.text(
+                xi + (i - 0.5) * bar_width,
+                b + t + (2 if t >= 0 else -2),
+                f"{t:+.0f}%",
+                ha="center", va="bottom" if t >= 0 else "top",
+                fontsize=8
+            )
+
+    ax.axhline(0, color="gray", linewidth=1, zorder=4)
+    ax.set_ylabel("% change vs DummyADL")
+    ax.set_xticks(x)
+    ax.set_xticklabels(model_order, rotation=45, ha="right")
+    ax.legend(title="Metric")
+    sns.despine()
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+    plt.show()
+
+
+def plot_model_helpfulness(real_df, dummy_base, metrics, figsize=(6, 4), dpi=300, save_path=None):
+    """
+    Simple barplot showing % improvement vs DummyADL for given metrics.
+    """
+
+    records = []
+    for model, g in real_df.groupby("model"):
+        base = g.query("thresh==0.5")    # untuned
+
+        for m in metrics:
+            v0 = base[m].values[0]
+            vd = dummy_base[m].values[0]
+            pct_improv = 100 * (vd - v0) / vd
+            records.append({"model": model, "metric": m, "pct_improvement": pct_improv})
+
+    df = pd.DataFrame(records)
+
+    # Sort models by average improvement
+    model_order = df.groupby("model")["pct_improvement"].mean().sort_values().index
+    df["model"] = pd.Categorical(df["model"], categories=model_order, ordered=True)
+
+    # Plot
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    palette = dict(zip(metrics, sns.color_palette("tab10", n_colors=len(metrics))))
+    sns.barplot(data=df, x="model", y="pct_improvement", hue="metric", palette=palette, ax=ax)
+
+    ax.axhline(0, color="gray", linewidth=1)
+    ax.set_ylabel("% change vs DummyADL")
+    ax.set_xlabel("")
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
+    ax.legend(title="Metric")
+    sns.despine()
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+    plt.show()
+
+def fpr_score(y, y_pred):
+    cm = confusion_matrix(y, y_pred)
+    tn, fp, _, _ = cm.ravel()
+    tnr = tn / (tn + fp)
+    return 1 - tnr
+
+# function to plot precision-recall curve and ROC curve for tuned and untuned models
+def plot_precision_recall_roc(untuned_model, tuned_model, X_test, y_test, cv_results):
+    scoring = {
+        "precision": make_scorer(precision_score),
+        "recall": make_scorer(recall_score),
+        "fpr": make_scorer(fpr_score),
+        "tpr": make_scorer(recall_score),
+    }
+    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(15, 4), dpi=200, layout="constrained")
+    linestyles = ("dashed", "dotted")
+    markerstyles = ("o", ">")
+    colors = ("tab:blue", "tab:orange")
+    names = ("Vanilla GBDT", "Tuned GBDT")
+    for idx, (est, linestyle, marker, color, name) in enumerate(
+        zip((untuned_model, tuned_model), linestyles, markerstyles, colors, names)
+    ):
+        decision_threshold = getattr(est, "best_threshold_", 0.5)
+        PrecisionRecallDisplay.from_estimator(
+            est,
+            X_test,
+            y_test,
+            linestyle=linestyle,
+            color=color,
+            ax=axs[0],
+            name=name,
+        )
+        axs[0].plot(
+            scoring["recall"](est, X_test, y_test),
+            scoring["precision"](est, X_test, y_test),
+            marker,
+            markersize=10,
+            color=color,
+            label=f"Cut-off point at probability of {decision_threshold:.2f}",
+        )
+        RocCurveDisplay.from_estimator(
+            est,
+            X_test,
+            y_test,
+            curve_kwargs=dict(linestyle=linestyle, color=color),
+            ax=axs[1],
+            name=name,
+            plot_chance_level=idx == 1,
+        )
+        axs[1].plot(
+            scoring["fpr"](est, X_test, y_test),
+            scoring["tpr"](est, X_test, y_test),
+            marker,
+            markersize=10,
+            color=color,
+            label=f"Cut-off point at probability of {decision_threshold:.2f}",
+        )
+
+    axs[0].set_title("Precision-Recall curve")
+    axs[0].legend()
+    axs[1].set_title("ROC curve")
+    axs[1].legend()
+
+    axs[2].plot(
+        tuned_model.cv_results_["thresholds"],
+        tuned_model.cv_results_["scores"],
+        color="tab:orange",
+    )
+    axs[2].plot(
+        tuned_model.best_threshold_,
+        tuned_model.best_score_,
+        "o",
+        markersize=10,
+        color="tab:orange",
+        label="Optimal cut-off point for the gain metric",
+    )
+    axs[2].legend()
+    axs[2].set_xlabel("Decision threshold (probability)")
+    axs[2].set_ylabel("Objective score (using cost-matrix)")
+    axs[2].set_title("Objective score as a function of the decision threshold")

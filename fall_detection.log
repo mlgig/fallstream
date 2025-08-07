@@ -213,3 +213,125 @@
 2025-08-06 00:59:39,087 [INFO] Training models (seed=1)
 2025-08-06 00:59:42,516 [INFO] Training models (seed=2)
 2025-08-06 00:59:50,222 [INFO] ✅ Evaluation complete
+2025-08-07 09:09:25,004 [INFO] Training models (seed=0)
+2025-08-07 09:09:45,702 [INFO] ✅ Evaluation complete
+2025-08-07 09:09:45,704 [INFO] Training models (seed=0)
+2025-08-07 09:10:33,895 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:10:45,792 [INFO] ✅ Evaluation complete
+2025-08-07 09:10:45,794 [INFO] Training models (seed=0)
+2025-08-07 09:11:34,081 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:11:45,749 [INFO] ✅ Evaluation complete
+2025-08-07 09:11:45,751 [INFO] Training models (seed=0)
+2025-08-07 09:12:33,927 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:12:45,678 [INFO] ✅ Evaluation complete
+2025-08-07 09:12:45,680 [INFO] Training models (seed=0)
+2025-08-07 09:13:34,182 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:13:45,893 [INFO] ✅ Evaluation complete
+2025-08-07 09:13:45,895 [INFO] Training models (seed=0)
+2025-08-07 09:14:34,230 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:14:45,943 [INFO] ✅ Evaluation complete
+2025-08-07 09:14:45,945 [INFO] Training models (seed=0)
+2025-08-07 09:15:34,295 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:15:46,111 [INFO] ✅ Evaluation complete
+2025-08-07 09:15:46,112 [INFO] Training models (seed=0)
+2025-08-07 09:16:34,308 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:16:46,034 [INFO] ✅ Evaluation complete
+2025-08-07 09:16:46,036 [INFO] Training models (seed=0)
+2025-08-07 09:17:34,387 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:17:46,102 [INFO] ✅ Evaluation complete
+2025-08-07 09:25:53,918 [INFO] Training models (seed=0)
+2025-08-07 09:26:13,929 [INFO] ✅ Evaluation complete
+2025-08-07 09:26:13,931 [INFO] Training models (seed=0)
+2025-08-07 09:27:02,122 [INFO] QUANT: threshold tuned to 0.46
+2025-08-07 09:27:14,037 [INFO] ✅ Evaluation complete
+2025-08-07 09:27:14,039 [INFO] Training models (seed=0)
+2025-08-07 09:28:02,249 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 09:28:14,073 [INFO] ✅ Evaluation complete
+2025-08-07 09:28:14,075 [INFO] Training models (seed=0)
+2025-08-07 09:29:02,567 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 09:29:14,244 [INFO] ✅ Evaluation complete
+2025-08-07 09:29:14,246 [INFO] Training models (seed=0)
+2025-08-07 09:30:02,411 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 09:30:14,062 [INFO] ✅ Evaluation complete
+2025-08-07 09:30:14,064 [INFO] Training models (seed=0)
+2025-08-07 09:31:02,195 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 09:31:13,892 [INFO] ✅ Evaluation complete
+2025-08-07 09:31:13,894 [INFO] Training models (seed=0)
+2025-08-07 09:32:02,266 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 09:32:13,911 [INFO] ✅ Evaluation complete
+2025-08-07 09:32:13,913 [INFO] Training models (seed=0)
+2025-08-07 09:33:02,377 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 09:33:14,148 [INFO] ✅ Evaluation complete
+2025-08-07 09:33:14,150 [INFO] Training models (seed=0)
+2025-08-07 09:34:02,692 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:34:14,433 [INFO] ✅ Evaluation complete
+2025-08-07 09:34:14,435 [INFO] Training models (seed=0)
+2025-08-07 09:35:02,870 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 09:35:14,597 [INFO] ✅ Evaluation complete
+2025-08-07 09:35:14,599 [INFO] Training models (seed=0)
+2025-08-07 09:36:02,905 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 09:36:14,612 [INFO] ✅ Evaluation complete
+2025-08-07 09:36:14,614 [INFO] Training models (seed=0)
+2025-08-07 09:37:03,000 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:37:14,723 [INFO] ✅ Evaluation complete
+2025-08-07 09:37:14,725 [INFO] Training models (seed=0)
+2025-08-07 09:38:03,132 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:38:15,094 [INFO] ✅ Evaluation complete
+2025-08-07 09:38:15,096 [INFO] Training models (seed=0)
+2025-08-07 09:39:03,295 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 09:39:14,945 [INFO] ✅ Evaluation complete
+2025-08-07 09:39:14,947 [INFO] Training models (seed=0)
+2025-08-07 09:40:03,098 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:40:14,762 [INFO] ✅ Evaluation complete
+2025-08-07 09:40:14,764 [INFO] Training models (seed=0)
+2025-08-07 09:41:02,922 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 09:41:14,829 [INFO] ✅ Evaluation complete
+2025-08-07 09:41:14,831 [INFO] Training models (seed=0)
+2025-08-07 09:42:03,144 [INFO] QUANT: threshold tuned to 0.26
+2025-08-07 09:42:14,832 [INFO] ✅ Evaluation complete
+2025-08-07 13:51:36,009 [INFO] Training models (seed=0)
+2025-08-07 13:51:56,188 [INFO] ✅ Evaluation complete
+2025-08-07 13:52:18,263 [INFO] Training models (seed=0)
+2025-08-07 13:52:38,124 [INFO] ✅ Evaluation complete
+2025-08-07 13:52:38,129 [INFO] Training models (seed=0)
+2025-08-07 13:53:26,264 [INFO] QUANT: threshold tuned to 0.46
+2025-08-07 13:53:37,930 [INFO] ✅ Evaluation complete
+2025-08-07 13:53:37,932 [INFO] Training models (seed=0)
+2025-08-07 13:54:26,035 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 13:54:37,680 [INFO] ✅ Evaluation complete
+2025-08-07 13:54:37,682 [INFO] Training models (seed=0)
+2025-08-07 13:55:25,879 [INFO] QUANT: threshold tuned to 0.27
+2025-08-07 13:55:37,631 [INFO] ✅ Evaluation complete
+2025-08-07 13:55:37,633 [INFO] Training models (seed=0)
+2025-08-07 13:56:26,107 [INFO] QUANT: threshold tuned to 0.26
+2025-08-07 13:56:38,541 [INFO] ✅ Evaluation complete
+2025-08-07 14:26:58,867 [INFO] Training models (seed=0)
+2025-08-07 14:27:10,618 [INFO] Training models (seed=1)
+2025-08-07 14:27:21,245 [INFO] Training models (seed=2)
+2025-08-07 14:30:02,528 [INFO] ✅ Evaluation complete
+2025-08-07 14:30:02,534 [INFO] Training models (seed=0)
+2025-08-07 14:30:03,196 [INFO] Training models (seed=1)
+2025-08-07 14:30:03,758 [INFO] Training models (seed=2)
+2025-08-07 14:30:13,740 [INFO] ✅ Evaluation complete
+2025-08-07 14:30:13,742 [INFO] Training models (seed=0)
+2025-08-07 14:30:17,295 [INFO] Training models (seed=1)
+2025-08-07 14:30:20,729 [INFO] Training models (seed=2)
+2025-08-07 14:30:28,760 [INFO] ✅ Evaluation complete
+2025-08-07 14:30:28,765 [INFO] Training models (seed=0)
+2025-08-07 14:30:46,137 [INFO] Catch22: threshold tuned to 0.38
+2025-08-07 14:31:39,949 [INFO] QUANT: threshold tuned to 0.40
+2025-08-07 14:31:39,950 [INFO] Training models (seed=1)
+2025-08-07 14:31:59,736 [INFO] Training models (seed=2)
+2025-08-07 15:26:52,546 [INFO] ✅ Evaluation complete
+2025-08-07 15:26:52,549 [INFO] Training models (seed=0)
+2025-08-07 15:26:57,652 [INFO] MiniRocket: threshold tuned to 0.01
+2025-08-07 15:26:57,654 [INFO] Training models (seed=1)
+2025-08-07 15:26:58,244 [INFO] Training models (seed=2)
+2025-08-07 15:27:07,275 [INFO] ✅ Evaluation complete
+2025-08-07 15:27:07,277 [INFO] Training models (seed=0)
+2025-08-07 15:27:28,625 [INFO] ExtraTrees: threshold tuned to 0.48
+2025-08-07 15:27:28,627 [INFO] Training models (seed=1)
+2025-08-07 15:27:32,140 [INFO] Training models (seed=2)
+2025-08-07 15:27:40,140 [INFO] ✅ Evaluation complete
+2025-08-07 15:40:40,300 [INFO] Training models (seed=0)
+2025-08-07 15:45:48,798 [INFO] QUANT: threshold tuned to 0.40

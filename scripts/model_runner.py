@@ -42,7 +42,10 @@ logger = logging.getLogger(__name__)
 def _train_models(X, y, model_specs: List[ModelSpec], *, random_state: int = 0, **kw):
     trained = {}
     thresholds = {}
-    cost_score = make_scorer(cost_fn)
+    cost_score = make_scorer(
+        cost_fn, fn_factor=kw.get("fn_factor", 2.0),
+        tp_factor=kw.get("tp_factor", 1.0)
+    )
 
     logger.info(f"Training models (seed={random_state})")
     for spec in tqdm(model_specs, desc=f"Training (seed={random_state})"):
@@ -58,12 +61,23 @@ def _train_models(X, y, model_specs: List[ModelSpec], *, random_state: int = 0, 
             continue
 
         if kw.get("tune_threshold", False):
-            tuned = TunedThresholdClassifierCV(est, cv=5, scoring=cost_score).fit(X, y)
+            tuned = TunedThresholdClassifierCV(est, cv=5, scoring=cost_score,
+                                               store_cv_results=True).fit(X, y)
             thresholds[spec.name] = tuned.best_threshold_
+            if kw.get("saved_tuned_dir", None) is not None:
+                save_dir = kw["saved_tuned_dir"]
+                # saved in root directory in folder named after the spec
+                os.makedirs(save_dir, exist_ok=True)
+                joblib.dump(tuned, f"{save_dir}/{spec.name}_tuned.joblib")
+                joblib.dump(est, f"{save_dir}/{spec.name}_base.joblib")
+                # save CV results
+                with open(f"{save_dir}/cv_results_{spec.name}.csv", "w") as f:
+                    pd.DataFrame(tuned.cv_results_).to_csv(f, index=False)
+                logger.info(f"Saved tuned model and CV results for {spec.name} to {save_dir}")
             logger.info(f"{spec.name}: threshold tuned to {tuned.best_threshold_:.2f}")
     return trained, thresholds
 
-def run_models(X_train, X_test, y_train, y_test, *, model_specs: List[ModelSpec], model_seeds=(0,), aggregate_seeds=True, saved_models=None, save_path=None, freq=100, ensemble_models=True, ensemble_by_kind=True, verbose=True, **kw):
+def run_models(X_train, X_test, y_train, y_test, *, model_specs: List[ModelSpec], model_seeds=(0,), aggregate_seeds=True, saved_models=None, save_path=None, freq=100, ensemble_models=True, ensemble_by_kind=True, verbose=True, saved_tuned_dir=None, **kw):
     if saved_models:
         cache = joblib.load(saved_models)
         trained_models = cache["models"]
