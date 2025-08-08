@@ -52,7 +52,7 @@ def single_subject_split(dataset, **kwargs):
 def split_df(
         df: pd.DataFrame,
         dataset,
-        test_set: Sequence[int],
+        test_set: Sequence[int] | None,
         **kwargs: dict
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -74,7 +74,7 @@ def split_df(
                       'window_size': 60, 'segment_test': True, 'prefall': None, 'new_freq': 100, 'augment_data': None}
 
     kwargs = {**default_kwargs, **kwargs}
-    if not kwargs['split']:
+    if not kwargs['split'] or test_set is None:
         X, y = dataset.get_X_y(df, **kwargs)
         return X, y
     
@@ -371,3 +371,46 @@ def aggregrate_metrics(df, cols):
         for col in cols[1:]:
             aggr[col].append(f'{mean_df.loc[i][col]} ± {std_df.loc[i][col]}')
     return pd.DataFrame(data=aggr)
+
+def sliding_window_confidence_with_labels(ts, fall_point, model, step=1, freq=100, signal_thresh=1.4,
+                                               method='max', **kwargs):
+    """
+    Fast version: returns list of (score, label) per window.
+    Label is 1 if window overlaps with fall_range, 0 otherwise.
+    """
+    import numpy as np
+
+    w = kwargs.get('window_size', 10)
+    t = kwargs.get('tolerance', 0.5)
+    window_len = int(w * freq)
+    step_len = int(step * freq)
+    ts = np.asarray(ts, dtype=np.float32)
+    n = len(ts)
+
+    # Define fall range (start and end)
+    fall_start = max((fall_point - freq) - int(freq * (w + t)), 0)
+    fall_end = min((fall_point + int(freq * (w - 1))) + int(freq * t), n)
+
+    # Precompute windows using striding
+    starts = np.arange(0, n - window_len + 1, step_len)
+    ends = starts + window_len
+
+    # Stack all windows at once (shape: num_windows × window_len)
+    windows = np.lib.stride_tricks.sliding_window_view(ts, window_len)[::step_len]
+
+    # Filter windows based on signal threshold
+    max_vals = windows.max(axis=1)
+    mask = max_vals >= signal_thresh
+    valid_windows = windows[mask]
+    valid_starts = starts[mask]
+    valid_ends = ends[mask]
+
+    # Predict all at once
+    scores = model.predict_proba(valid_windows)[:, 1]
+
+    # Label each window using fast overlap check
+    overlaps = (valid_starts < fall_end) & (valid_ends > fall_start)
+    labels = overlaps.astype(int)
+
+    return scores.tolist(), labels.tolist()
+

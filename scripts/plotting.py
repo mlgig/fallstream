@@ -1,5 +1,7 @@
 from __future__ import annotations
+import re
 
+from matplotlib import rc
 import test
 """Reusable plotting helpers with a unified seaborn / matplotlib style."""
 import seaborn as sns
@@ -12,14 +14,18 @@ from matplotlib.axes import Axes
 from typing import Sequence
 import pandas as pd
 from aeon.visualisation import plot_critical_difference as cd
-from sklearn.metrics import make_scorer, precision_score, recall_score, confusion_matrix
+from sklearn.metrics import make_scorer, precision_score, recall_score, confusion_matrix, auc
 from sklearn.metrics import PrecisionRecallDisplay, RocCurveDisplay
+from scripts import utils
+from scripts import farseeing as fs
+import pickle, tqdm
 
 
 sns.set_theme(style="ticks", font_scale=1.1)
 
 __all__ = ["metric_box", "compare_models", "metric_grid", 
            "plot_confidence", "plot_detection", "critical_difference", "window_bar"]
+
 
 def metric_box(df: pd.DataFrame, metric: str, *, x="model",
                hue=None, order=None, title=None,
@@ -411,77 +417,33 @@ def fpr_score(y, y_pred):
     tnr = tn / (tn + fp)
     return 1 - tnr
 
+def get_cm(model, X, y, thresh=0.5):
+    for i, (ts, y) in enumerate(zip(X, y)):
+        if len(ts) < 100000 or (120001 < len(ts) < 300000):
+            continue
+        c, ave_t = utils.sliding_window_confidence(ts, y, model)
+        cm, _, _ = utils.detect(ts, y, c, confidence_thresh=thresh)
+        CM += cm
+    return CM
+
 # function to plot precision-recall curve and ROC curve for tuned and untuned models
-def plot_precision_recall_roc(untuned_model, tuned_model, X_test, y_test, cv_results):
-    scoring = {
-        "precision": make_scorer(precision_score),
-        "recall": make_scorer(recall_score),
-        "fpr": make_scorer(fpr_score),
-        "tpr": make_scorer(recall_score),
-    }
-    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(15, 4), dpi=200, layout="constrained")
-    linestyles = ("dashed", "dotted")
-    markerstyles = ("o", ">")
-    colors = ("tab:blue", "tab:orange")
-    names = ("Vanilla GBDT", "Tuned GBDT")
-    for idx, (est, linestyle, marker, color, name) in enumerate(
-        zip((untuned_model, tuned_model), linestyles, markerstyles, colors, names)
-    ):
-        decision_threshold = getattr(est, "best_threshold_", 0.5)
-        PrecisionRecallDisplay.from_estimator(
-            est,
-            X_test,
-            y_test,
-            linestyle=linestyle,
-            color=color,
-            ax=axs[0],
-            name=name,
-        )
-        axs[0].plot(
-            scoring["recall"](est, X_test, y_test),
-            scoring["precision"](est, X_test, y_test),
-            marker,
-            markersize=10,
-            color=color,
-            label=f"Cut-off point at probability of {decision_threshold:.2f}",
-        )
-        RocCurveDisplay.from_estimator(
-            est,
-            X_test,
-            y_test,
-            curve_kwargs=dict(linestyle=linestyle, color=color),
-            ax=axs[1],
-            name=name,
-            plot_chance_level=idx == 1,
-        )
-        axs[1].plot(
-            scoring["fpr"](est, X_test, y_test),
-            scoring["tpr"](est, X_test, y_test),
-            marker,
-            markersize=10,
-            color=color,
-            label=f"Cut-off point at probability of {decision_threshold:.2f}",
-        )
+def plot_threshold_curve(tuned_model, save_path=None):
+    plt.figure(figsize=(4, 3), dpi=400)
 
-    axs[0].set_title("Precision-Recall curve")
-    axs[0].legend()
-    axs[1].set_title("ROC curve")
-    axs[1].legend()
-
-    axs[2].plot(
-        tuned_model.cv_results_["thresholds"],
-        tuned_model.cv_results_["scores"],
-        color="tab:orange",
+    plt.plot(tuned_model.cv_results_["thresholds"],
+            tuned_model.cv_results_["scores"]/100,
+            color="tab:orange",
     )
-    axs[2].plot(
-        tuned_model.best_threshold_,
-        tuned_model.best_score_,
-        "o",
-        markersize=10,
-        color="tab:orange",
-        label="Optimal cut-off point for the gain metric",
+    plt.plot(tuned_model.best_threshold_,
+            tuned_model.best_score_/100,
+            "o",
+            markersize=10,
+            color="tab:orange",
+            label="Optimal cut-off point",
     )
-    axs[2].legend()
-    axs[2].set_xlabel("Decision threshold (probability)")
-    axs[2].set_ylabel("Objective score (using cost-matrix)")
-    axs[2].set_title("Objective score as a function of the decision threshold")
+    plt.legend()
+    plt.xlabel("Decision threshold")
+    plt.ylabel(r"gain $\times 10^{-2}$")
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+    plt.show()
