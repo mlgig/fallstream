@@ -428,7 +428,7 @@ def get_cm(model, X, y, thresh=0.5):
 
 # function to plot precision-recall curve and ROC curve for tuned and untuned models
 def plot_threshold_curve(tuned_model, save_path=None):
-    plt.figure(figsize=(4, 3), dpi=400)
+    plt.figure(figsize=(6, 5), dpi=400)
 
     plt.plot(tuned_model.cv_results_["thresholds"],
             tuned_model.cv_results_["scores"]/100,
