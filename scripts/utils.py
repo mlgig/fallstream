@@ -204,15 +204,15 @@ def detect(ts, fall_point, c, **kwargs):
     kwargs = {**default_kwargs, **kwargs}
     """Obtain TP, FP, TN, and FN based on confidence mapping."""
     window_size = kwargs['window_size']
-    step_size = kwargs['step']
+    step_size = kwargs['step'] * 100
     # Get high confidence regions
     high_conf = get_high_confidence_regions(ts, c, **kwargs)
     tolerance = kwargs['tolerance']
     # n_samples = len(ts) // (kwargs['window_size']*kwargs['freq'])
-    n_samples = int((len(ts) - window_size) // step_size) + 1
+    n_samples = int((len(ts) - (window_size*100)) // step_size) + 1
     const_conf = kwargs.get('const_confidence', False)
     if const_conf:
-        N = int(len(ts) // window_size)
+        N = int(len(ts) // (window_size*100))
         if const_conf == 1:
             TP, FP, TN, FN = 1, N - 1, 0, 0
         else:

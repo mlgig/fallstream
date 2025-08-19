@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.ticker as mticker
 import matplotlib.collections as mcoll
+from matplotlib.lines import Line2D
 import numpy as np
 from matplotlib.axes import Axes
 from typing import Sequence
@@ -104,53 +105,86 @@ def metric_grid(
     plt.show()
 
 def plot_confidence(
-    ts,
-    c,
-    y,
-    tp,
-    fp,
-    tn,
-    fn,
+    ts, c, y, tp, fp, tn, fn,
     *,
     high_conf: Sequence[int] | None = None,
     ave_time: float = 0.0,
     model_name: str = "",
     title: str | None = None,
+    save_path: str | None = None,
+    show: bool = True,
+    thresh_line: float | None = None,  # threshold is for CONFIDENCE (right axis)
+    **kwargs
 ):
-    """Plot raw signal coloured by confidence plus optional high‑conf spans."""
-    x = np.arange(len(c))
-    fig, ax = plt.subplots(figsize=(12, 6), dpi=200)
-    cmap = plt.get_cmap("coolwarm")
-    ax.plot(x, c, linestyle=":", label="confidence")
+    """
+    Single-panel plot with LEFT y-axis = acceleration (g),
+    RIGHT y-axis = confidence [0,1]. Threshold is drawn on the right axis
+    to avoid implying acceleration is thresholded.
+    """
+    x = np.arange(len(ts))
+    fig, ax = plt.subplots(figsize=(7, 3), dpi=400)
 
-    # colourise raw signal by confidence
+    # --- Left axis: acceleration ---
+    ax.set_xlabel("Timepoints")
+    ax.set_ylabel("Acceleration (g)")
+    ax.set_ylim(min(-0.1, np.min(ts)*1.05), np.max(ts) + 0.5)
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax.plot(x, ts, lw=0.8, color="0.25", label="Acceleration (g)", zorder=1)
+
+    # Colored segments by confidence
+    cmap = plt.get_cmap("coolwarm")
     norm = mcolors.Normalize(vmin=0, vmax=1)
     colors = cmap(norm(c[:-1]))
     segments = [[(x[i], ts[i]), (x[i + 1], ts[i + 1])] for i in range(len(ts) - 1)]
-    ax.add_collection(mcoll.LineCollection(segments, colors=colors, linewidths=1.5))
+    ax.add_collection(mcoll.LineCollection(segments, colors=colors, linewidths=1.2, alpha=0.9, zorder=2))
 
-    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-    ax.set_xlabel("Timepoints")
-    ax.set_ylabel("Acceleration (g)")
-    ax.set_ylim(-0.1, max(ts) + 0.5)
-
-    # colourbar
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    sm.set_array([])
-    plt.colorbar(sm, ax=ax, fraction=0.03, pad=0.08, label="Confidence")
-
-    # highlight detections
+    # Fall onset and highlight spans
     if high_conf is not None:
         for h in high_conf:
-            ax.axvspan(h, h + 4000, color="gray", alpha=0.3)
+            ax.axvspan(h, h + 4000, color="0.8", alpha=0.3, zorder=0)
     if y != -1:
-        ax.axvline(x=y, color="red", linestyle="--", label="Fall")
-    ax.legend()
+        ax.axvline(x=y, color="red", linestyle="--", linewidth=1.0, label="Fall onset", zorder=3)
 
-    header = title or ""
-    stats  = f"TP:{tp} FP:{fp} TN:{tn} FN:{fn}  Time/sample:{ave_time:.2f} ms"
-    ax.set_title(f"{header} {stats} {model_name}")
-    plt.show()
+    # --- Colorbar as right axis ---
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, fraction=0.05, pad=0.0)  # pad=0 → flush with axis
+    cbar.set_label("Confidence")
+    cbar.ax.yaxis.set_label_position('right')
+    cbar.ax.yaxis.set_ticks_position('right')
+
+    # Add threshold marker to the colorbar (instead of plotting on accel axis)
+    if thresh_line is not None:
+        cbar.ax.hlines(thresh_line, 0, 1, colors="black", lw=2.0)
+        cbar.ax.plot(-0.15, thresh_line, marker=r'$\triangleright$', color="black",
+                    markersize=10, clip_on=False)
+
+        # And also add a proxy to the legend
+        triangle = Line2D([], [], color="black", marker=r'$\triangleright$',
+                    linestyle="None", markersize=10, label=f"τ={thresh_line}")
+        handles, labels = ax.get_legend_handles_labels()
+        handles.append(triangle)
+        labels.append(f"τ={thresh_line:.2f}")
+        ax.legend(handles, labels, loc="upper left", frameon=False)
+    else:
+        # Legend (just for acceleration + fall onset)
+        ax.legend(loc="upper left", frameon=False)
+
+    # Convert x to seconds
+    sec_formatter = mticker.FuncFormatter(lambda x, pos: f"{int(x/100)}")
+    ax.xaxis.set_major_formatter(sec_formatter)
+    # Force ticks to land on nice integers (in seconds)
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax.set_xlabel("Time (s)")
+
+    # Title with stats
+    stats = f"TP:{tp} FP:{fp} TN:{tn} FN:{fn} Time/sample: {ave_time:.2f} ms"
+    ax.set_title(f"{title or ''}  {stats}  {model_name}")
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+    if show:
+        plt.show()
 
 
 def plot_detection(
@@ -191,21 +225,12 @@ def plot_detection(
     tn, fp, fn, tp = cm.ravel()
     should_plot = cfg.get("plot", False)
     err_plot    = cfg.get("plot_errors", False) and (fp or fn)
-    ave_plot    = cfg.get("plot_ave_conf", False) and (fp or fn)
+    plot_misses    = cfg.get("plot_misses", False) and (fp or fn)
 
-    if should_plot or err_plot or ave_plot:
-        plot_confidence(
-            ts,
-            c,
-            y,
-            tp,
-            fp,
-            tn,
-            fn,
-            high_conf=high_conf,
-            ave_time=ave_time,
-            **cfg,
-        )
+    if should_plot or err_plot or plot_misses:
+        plot_confidence( ts, c, y, tp, fp, tn, fn,
+                        high_conf=high_conf,
+                        ave_time=ave_time, **cfg)
 
 def critical_difference(
     df: pd.DataFrame,
@@ -444,6 +469,16 @@ def plot_threshold_curve(tuned_model, save_path=None):
     plt.legend()
     plt.xlabel("Decision threshold")
     plt.ylabel(r"gain $\times 10^{-2}$")
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+    plt.show()
+
+def save_confusion_matrix(CM, save_path=None):
+    fig, ax = plt.subplots(figsize=(2, 2), dpi=400)
+    sns.heatmap(CM, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax,
+                xticklabels=["ADLs", "Falls"], yticklabels=["ADLs", "Falls"])
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
     plt.show()

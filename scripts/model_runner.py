@@ -18,7 +18,7 @@ from sklearn.calibration import CalibratedClassifierCV
 from tqdm import tqdm
 
 from scripts.utils import sliding_window_confidence, detect
-from scripts.plotting import plot_detection
+from scripts.plotting import plot_detection, save_confusion_matrix
 from scripts.metric import compute_row
 from scripts.model_spec import ModelSpec
 from scripts.models import _set_seed
@@ -143,6 +143,13 @@ def run_models(X_train, X_test, y_train, y_test, *, model_specs: List[ModelSpec]
             CM += cm
             delays.append(delay)
             tot_time += ave_t
+            if i==18:
+                detection_plot_dir = kw.get("save_detection_plot_dir", None)
+                if detection_plot_dir is not None:
+                    detection_plot_dir = os.path.join(detection_plot_dir,
+                                                    f"{name}_s{seed}_thresh_{thresh}_{i}.pdf")
+                plot_detection(ts, y, c, cm, hit, ave_t, save_path=detection_plot_dir,
+                               thresh_line=thresh, model_name=name, **kw)
 
         ave_t = tot_time / max(1, len(conf_map))
         row = compute_row(CM, signal_time, ave_t, np.mean(delays))
@@ -150,6 +157,11 @@ def run_models(X_train, X_test, y_train, y_test, *, model_specs: List[ModelSpec]
         metrics_rows.append(row)
         if spec.kind != "baseline":
             conf_by_model.append((spec.kind, pd.Series(conf_map)))
+        # save confusion matrix heatmap
+        if kw.get("save_confusion_matrix", False):
+            detection_plot_dir = kw.get("save_detection_plot_dir", None)
+            save_confusion_matrix(CM, save_path=os.path.join(
+                detection_plot_dir, f"{name}_s{seed}_thresh{thresh}_cm.pdf"))
 
     def _ensemble(label, series_list):
         CM = np.zeros((2, 2), dtype=int)

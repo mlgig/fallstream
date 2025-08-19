@@ -342,3 +342,77 @@
 2025-08-07 16:04:29,690 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
 2025-08-07 16:04:29,690 [INFO] QUANT: threshold tuned to 0.40
 2025-08-07 16:04:46,218 [INFO] ✅ Evaluation complete
+2025-08-19 14:54:09,074 [INFO] Training models (seed=0)
+2025-08-19 14:54:57,860 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-19 14:54:57,860 [INFO] QUANT: threshold tuned to 0.40
+2025-08-19 15:03:36,523 [INFO] Training models (seed=0)
+2025-08-19 15:04:07,380 [INFO] Training models (seed=0)
+2025-08-19 15:34:53,621 [INFO] Training models (seed=0)
+2025-08-19 15:35:39,908 [INFO] Training models (seed=0)
+2025-08-19 15:37:37,710 [INFO] ✅ Evaluation complete
+2025-08-19 15:37:37,713 [INFO] Training models (seed=0)
+2025-08-19 15:38:26,118 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-19 15:38:26,119 [INFO] QUANT: threshold tuned to 0.40
+2025-08-19 15:40:17,249 [INFO] ✅ Evaluation complete
+2025-08-19 16:03:17,960 [INFO] Training models (seed=0)
+2025-08-19 16:05:17,037 [INFO] ✅ Evaluation complete
+2025-08-19 16:05:17,040 [INFO] Training models (seed=0)
+2025-08-19 16:06:05,299 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-19 16:06:05,300 [INFO] QUANT: threshold tuned to 0.40
+2025-08-19 16:07:56,806 [INFO] ✅ Evaluation complete
+2025-08-19 21:31:09,052 [INFO] Training models (seed=0)
+2025-08-19 21:31:35,060 [INFO] ✅ Evaluation complete
+2025-08-19 21:31:35,062 [INFO] Training models (seed=0)
+2025-08-19 21:32:23,576 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-19 21:32:23,576 [INFO] QUANT: threshold tuned to 0.40
+2025-08-19 21:32:40,772 [INFO] ✅ Evaluation complete
+2025-08-19 21:44:59,298 [INFO] Training models (seed=0)
+2025-08-19 21:45:24,282 [INFO] ✅ Evaluation complete
+2025-08-19 21:45:24,284 [INFO] Training models (seed=0)
+2025-08-19 21:46:12,238 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-19 21:46:12,239 [INFO] QUANT: threshold tuned to 0.40
+2025-08-19 21:46:28,949 [INFO] ✅ Evaluation complete
+2025-08-19 21:51:45,914 [INFO] Training models (seed=0)
+2025-08-19 21:52:10,778 [INFO] ✅ Evaluation complete
+2025-08-19 21:52:10,780 [INFO] Training models (seed=0)
+2025-08-19 21:52:59,075 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-19 21:52:59,076 [INFO] QUANT: threshold tuned to 0.40
+2025-08-19 21:53:15,440 [INFO] ✅ Evaluation complete
+2025-08-19 21:58:28,302 [INFO] Training models (seed=0)
+2025-08-19 21:58:53,829 [INFO] ✅ Evaluation complete
+2025-08-19 21:58:53,831 [INFO] Training models (seed=0)
+2025-08-19 22:01:12,634 [INFO] Training models (seed=0)
+2025-08-19 22:01:36,922 [INFO] ✅ Evaluation complete
+2025-08-19 22:01:36,925 [INFO] Training models (seed=0)
+2025-08-19 22:02:35,885 [INFO] Training models (seed=0)
+2025-08-19 22:03:00,613 [INFO] ✅ Evaluation complete
+2025-08-19 22:03:00,615 [INFO] Training models (seed=0)
+2025-08-19 22:03:46,704 [INFO] Training models (seed=0)
+2025-08-19 22:04:11,569 [INFO] ✅ Evaluation complete
+2025-08-19 22:04:11,572 [INFO] Training models (seed=0)
+2025-08-19 22:04:57,201 [INFO] Training models (seed=0)
+2025-08-19 22:05:22,347 [INFO] ✅ Evaluation complete
+2025-08-19 22:05:22,350 [INFO] Training models (seed=0)
+2025-08-19 22:21:09,146 [INFO] Training models (seed=0)
+2025-08-19 22:21:34,495 [INFO] ✅ Evaluation complete
+2025-08-19 22:21:34,497 [INFO] Training models (seed=0)
+2025-08-19 22:25:09,270 [INFO] Training models (seed=0)
+2025-08-19 22:25:33,727 [INFO] ✅ Evaluation complete
+2025-08-19 22:25:33,730 [INFO] Training models (seed=0)
+2025-08-19 22:31:07,027 [INFO] Training models (seed=0)
+2025-08-19 22:31:31,621 [INFO] ✅ Evaluation complete
+2025-08-19 22:31:31,623 [INFO] Training models (seed=0)
+2025-08-19 22:32:19,935 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-19 22:32:19,936 [INFO] QUANT: threshold tuned to 0.40
+2025-08-19 22:32:48,888 [INFO] Training models (seed=0)
+2025-08-19 22:33:14,200 [INFO] ✅ Evaluation complete
+2025-08-19 22:33:14,202 [INFO] Training models (seed=0)
+2025-08-19 22:34:02,536 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-19 22:34:02,537 [INFO] QUANT: threshold tuned to 0.40
+2025-08-19 22:34:19,960 [INFO] ✅ Evaluation complete
+2025-08-19 22:36:26,624 [INFO] Training models (seed=0)
+2025-08-19 22:36:50,729 [INFO] ✅ Evaluation complete
+2025-08-19 22:36:50,731 [INFO] Training models (seed=0)
+2025-08-19 22:37:39,592 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-19 22:37:39,592 [INFO] QUANT: threshold tuned to 0.40
+2025-08-19 22:37:56,462 [INFO] ✅ Evaluation complete
