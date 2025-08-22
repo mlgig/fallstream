@@ -1,0 +1,10 @@
+aeon==1.2.0
+joblib==1.5.1
+matplotlib==3.10.5
+numpy==2.3.2
+pandas==2.0.3
+scikit_learn==1.7.1
+scipy==1.16.1
+seaborn==0.13.2
+tensorflow==2.15.0
+tqdm==4.67.1
