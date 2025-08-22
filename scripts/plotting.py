@@ -112,7 +112,7 @@ def plot_confidence(
     model_name: str = "",
     title: str | None = None,
     save_path: str | None = None,
-    show: bool = True,
+    show: bool = False,
     thresh_line: float | None = None,  # threshold is for CONFIDENCE (right axis)
     **kwargs
 ):
@@ -141,7 +141,7 @@ def plot_confidence(
     # Fall onset and highlight spans
     if high_conf is not None:
         for h in high_conf:
-            ax.axvspan(h, h + 4000, color="0.8", alpha=0.3, zorder=0)
+            ax.axvspan(h, h + 4000, color="0.8", alpha=0.5, zorder=0)
     if y != -1:
         ax.axvline(x=y, color="red", linestyle="--", linewidth=1.0, label="Fall onset", zorder=3)
 

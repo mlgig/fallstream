@@ -416,3 +416,9 @@
 2025-08-19 22:37:39,592 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
 2025-08-19 22:37:39,592 [INFO] QUANT: threshold tuned to 0.40
 2025-08-19 22:37:56,462 [INFO] ✅ Evaluation complete
+2025-08-21 13:10:25,087 [INFO] Training models (seed=0)
+2025-08-21 13:10:49,823 [INFO] ✅ Evaluation complete
+2025-08-21 13:10:49,825 [INFO] Training models (seed=0)
+2025-08-21 13:11:38,330 [INFO] Saved tuned model and CV results for QUANT to results/model_cache
+2025-08-21 13:11:38,331 [INFO] QUANT: threshold tuned to 0.40
+2025-08-21 13:11:54,725 [INFO] ✅ Evaluation complete
