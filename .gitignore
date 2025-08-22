@@ -1,4 +1,6 @@
 data
-.vscode
 models
-main copy.ipynb 
+.keras
+.vscode
+.ipynb_checkpoints
+*.keras
