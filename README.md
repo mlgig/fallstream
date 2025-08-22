@@ -38,10 +38,10 @@ A BibTeX entry will be provided once the paper is accepted. In the meantime, you
 
 ```
 @article{aderinola2025watchyourstep,
-  title = {Watch Your Step: Realistic Fall Detection in Real-world Streaming Scenarios},
-  author = {Aderinola, Timilehin B. and Palmerini, Luca and D’Ascanio, Ilaria and Chiari, Lorenzo and Klenk, Jochen and Becker, Clemens and Caulfield, Brian and Ifrim, Georgiana},
+  title   = {Watch Your Step: Realistic Fall Detection in Real-world Streaming Scenarios},
+  author  = {Aderinola, Timilehin B. and Palmerini, Luca and D’Ascanio, Ilaria and Chiari, Lorenzo and Klenk, Jochen and Becker, Clemens and Caulfield, Brian and Ifrim, Georgiana},
   journal = {Under review},
-  year = {2025},
-  note = {Preprint; citation details will be updated upon publication}
+  year    = {2025},
+  note    = {Preprint; citation details will be updated upon publication}
 }
 ```
