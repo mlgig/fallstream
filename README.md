@@ -32,7 +32,7 @@ pip install -r requirements.txt
 If you use this code or results in your research, please cite the following work:
 
 **Timilehin B. Aderinola, Luca Palmerini, Ilaria D’Ascanio, Lorenzo Chiari, Jochen Klenk, Clemens Becker, Brian Caulfield, and Georgiana Ifrim.**
-_Watch Your Step: Realistic Fall Detection in Real-world Streaming Scenarios_. Under review, 2025.
+[_Watch Your Step: Realistic Fall Detection in Real-world Streaming Scenarios_](https://www.arxiv.org/abs/2509.11789). Under review, 2025.
 
 A BibTeX entry will be provided once the paper is accepted. In the meantime, you may use the following placeholder:
 
