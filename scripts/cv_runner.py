@@ -8,7 +8,6 @@ import copy
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit
-from scripts.shuffled_group_kfold import ShuffledGroupKFold
 
 logger = logging.getLogger(__name__)
 

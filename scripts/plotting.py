@@ -1,4 +1,5 @@
 from __future__ import annotations
+from cProfile import label
 import re
 
 from matplotlib import rc
@@ -140,10 +141,11 @@ def plot_confidence(
 
     # Fall onset and highlight spans
     if high_conf is not None:
+        span = 100 * kwargs.get("window_size", 10)
         for h in high_conf:
-            ax.axvspan(h, h + 4000, color="0.8", alpha=0.5, zorder=0)
+            ax.axvspan(h, h + span, color="0.8", alpha=0.4, zorder=0)
     if y != -1:
-        ax.axvline(x=y, color="red", linestyle="--", linewidth=1.0, label="Fall onset", zorder=3)
+        ax.axvline(x=y, color="red", linestyle="--", linewidth=1.0, label="Fall index", zorder=3)
 
     # --- Colorbar as right axis ---
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
@@ -169,6 +171,110 @@ def plot_confidence(
     else:
         # Legend (just for acceleration + fall onset)
         ax.legend(loc="upper left", frameon=False)
+    
+    if kwargs.get("zoom_thresh_plot", False) and thresh_line != 0.5:
+        left, right = kwargs["zoom_thresh_plot"]
+        ax.set_xlim(left, right)
+
+    # Convert x to seconds
+    sec_formatter = mticker.FuncFormatter(lambda x, pos: f"{int(x/100)}")
+    ax.xaxis.set_major_formatter(sec_formatter)
+    # Force ticks to land on nice integers (in seconds)
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax.set_xlabel("Time (s)")
+
+    # Title with stats
+    stats = f"TP:{tp} FP:{fp} TN:{tn} FN:{fn} Time/sample: {ave_time:.2f} ms"
+    ax.set_title(f"{title or ''}  {stats}  {model_name}")
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+    if show:
+        plt.show()
+
+def plot_confidence_lines(
+    ts, c, y, tp, fp, tn, fn,
+    *,
+    high_conf: Sequence[int] | None = None,
+    ave_time: float = 0.0,
+    model_name: str = "",
+    title: str | None = None,
+    save_path: str | None = None,
+    show: bool = False,
+    thresh_line: float | None = None,  # threshold is for CONFIDENCE (right axis)
+    **kwargs
+):
+    """
+    Single-panel plot with LEFT y-axis = acceleration (g),
+    RIGHT y-axis = confidence [0,1]. Threshold is drawn on the right axis
+    to avoid implying acceleration is thresholded.
+    """
+    x = np.arange(len(ts))
+    fig, ax = plt.subplots(figsize=(12, 3), dpi=400)
+
+    # --- Left axis: acceleration ---
+    ax.set_xlabel("Timepoints")
+    ax.set_ylabel("Acceleration (g)")
+    ax.set_ylim(min(-0.1, np.min(ts)*1.05), np.max(ts) + 0.5)
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax.plot(x, ts, lw=0.8, color="0.25", alpha=0.2, label="Acceleration", zorder=1)
+    # plot confidence as the twin axis
+    ax_r = ax.twinx()
+    ax_r.set_ylim(0, 1)
+
+    # turn OFF the right ticks/labels/spine on ax_r
+    ax_r.tick_params(right=False, labelright=False)
+    ax_r.spines['right'].set_visible(False)
+    # ax_r.set_ylabel("Confidence")
+    conf_line = ax_r.plot(x, c, lw=2.0, color="tab:blue", label="Confidence", zorder=2)
+
+    # Colored segments by confidence
+    cmap = plt.get_cmap("coolwarm")
+    norm = mcolors.Normalize(vmin=0, vmax=1)
+    colors = cmap(norm(c[:-1]))
+    segments = [[(x[i], c[i]), (x[i + 1], c[i + 1])] for i in range(len(c) - 1)]
+    ax_r.add_collection(mcoll.LineCollection(segments, colors=colors, linewidths=1.2, alpha=0.9, zorder=2))
+    # Threshold lines
+    ax_r.axhline(0.5, color="gray", lw=1.0, ls=":", zorder=2)
+    ax_r.text(70000, 0.51, f"τ=0.5 (default)")
+    if thresh_line is not None and thresh_line != 0.5:
+        ax_r.axhline(thresh_line, color="tab:green", lw=1.0, ls=":", zorder=2)
+        ax_r.text(70000, thresh_line - 0.07, f"τ={thresh_line:.2f} (tuned)")
+
+    # Fall onset and highlight spans
+    # Add an x at the detected start index and color the line as red based on span
+    if high_conf is not None:
+        span = 100 * kwargs.get("window_size", 10)
+        for h in high_conf:
+            ax_r.plot(h, c[h], marker="o", markersize=10,
+                      markerfacecolor="none", markeredgecolor="red",
+                      zorder=3, label="Predicted fall")
+    if y != -1:
+        ax.axvline(x=y, color="red", linestyle="--", linewidth=1.0, label="Fall index", zorder=3)
+
+    # --- Colorbar as right axis ---
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax_r, fraction=0.05, pad=0.0)  # pad=0 flush with axis
+    cbar.set_label("Confidence")
+    cbar.ax.yaxis.set_label_position('right')
+    cbar.ax.yaxis.set_ticks_position('right')
+    for t, c in zip([0.5, thresh_line], ['gray', 'tab:green']):
+        cbar.ax.hlines(t, 0, 1, colors=c, lw=1.5)
+        cbar.ax.plot(-0.15, t, marker=r'$\triangleright$', color=c,
+                    markersize=10, clip_on=False)
+
+    # Get handles and labels from both axes
+    h1, l1 = ax.get_legend_handles_labels()
+    h2, l2 = ax_r.get_legend_handles_labels()
+
+    # Combine them, while preserving order
+    handles = h1 + h2
+    labels  = l1 + l2
+
+    # Make a single legend
+    ax.legend(handles, labels, loc='upper left',
+              ncols=2, frameon=False)
 
     # Convert x to seconds
     sec_formatter = mticker.FuncFormatter(lambda x, pos: f"{int(x/100)}")
@@ -228,7 +334,7 @@ def plot_detection(
     plot_misses    = cfg.get("plot_misses", False) and (fp or fn)
 
     if should_plot or err_plot or plot_misses:
-        plot_confidence( ts, c, y, tp, fp, tn, fn,
+        plot_confidence_lines(ts, c, y, tp, fp, tn, fn,
                         high_conf=high_conf,
                         ave_time=ave_time, **cfg)
 
