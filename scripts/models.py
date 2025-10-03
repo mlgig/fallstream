@@ -15,6 +15,7 @@ from sklearn.base import BaseEstimator, clone
 
 from scripts.model_spec import ModelSpec
 from scripts.baselines import AlwaysADL, AlwaysFall
+from scripts.classifiers import CostClassifierCV
 from tensorflow import keras
 from tensorflow.keras.callbacks import EarlyStopping
 
@@ -24,6 +25,11 @@ early_stop = EarlyStopping(
     min_delta=1e-4,
     restore_best_weights=True
 )
+
+base_estimators=[
+    ExtraTreesClassifier(n_estimators=150,max_features=0.1,criterion="entropy"),
+    MiniRocketClassifier(n_jobs=-1), QUANTClassifier()
+]
 
 _TEMPLATE_SPECS: List[ModelSpec] = [
     ModelSpec(
@@ -87,6 +93,28 @@ _TEMPLATE_SPECS: List[ModelSpec] = [
                 callbacks=[early_stop])
         ),
         kind="dl",
+    ),
+    ModelSpec(
+        name="CostCVStacking",
+        estimator=make_pipeline(
+            StandardScaler(),
+            SimpleImputer(strategy="mean", missing_values=np.nan),
+            CostClassifierCV(method="stacking",
+                base_estimators=base_estimators
+            )
+        ),
+        kind="ensemble",
+    ),
+    ModelSpec(
+        name="CostCVDirichlet",
+        estimator=make_pipeline(
+            StandardScaler(),
+            SimpleImputer(strategy="mean", missing_values=np.nan),
+            CostClassifierCV(method="dirichlet",
+                base_estimators=base_estimators
+            )
+        ),
+        kind="ensemble",
     )
 ]
 

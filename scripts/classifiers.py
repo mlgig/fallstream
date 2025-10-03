@@ -1,87 +1,138 @@
-import copy, joblib
+import joblib
 import timeit
 import numpy as np, pandas as pd
-from scipy.signal import resample
-from scipy.signal import savgol_filter
 import matplotlib.pyplot as plt, seaborn as sns
-import matplotlib.colors as mcolors
-import test
+
 sns.set_style("ticks")
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from scripts import farseeing, utils
-from sklearn.model_selection import KFold
-
-import matplotlib.ticker as mticker
-
-from sklearn.linear_model import RidgeClassifierCV
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.ensemble import ExtraTreesClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
-from sklearn.feature_selection import SelectFromModel
 from sklearn.model_selection import TunedThresholdClassifierCV
-from sklearn.pipeline import make_pipeline, Pipeline, FeatureUnion
-from sklearn.base import BaseEstimator, TransformerMixin
-
-from sklearn.metrics import roc_auc_score, roc_curve, auc
-from sklearn.metrics import precision_recall_fscore_support
+from sklearn.pipeline import make_pipeline
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.metrics import confusion_matrix, make_scorer
-from sklearn.metrics import classification_report
 from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import ConfusionMatrixDisplay
+from sklearn.calibration import CalibratedClassifierCV
 
-from aeon.classification.feature_based import Catch22Classifier
-from aeon.classification.interval_based import QUANTClassifier
-from aeon.classification.convolution_based import RocketClassifier, HydraClassifier
-from aeon.classification.convolution_based import MultiRocketHydraClassifier
+import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import confusion_matrix
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.linear_model import LogisticRegression
 
-class WorkerTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, worker_model):
-        self.worker_model = worker_model
+class CostClassifierCV(BaseEstimator, ClassifierMixin):
+    """
+    Cost-sensitive ensemble classifier with optional calibration.
+    Two fusion methods:
+        - "dirichlet": random search over weight vectors + threshold tuning
+        - "stacking": logistic regression meta-learner on base probs
+    """
 
-    def fit(self, X, y=None):
-        self.worker_model.fit(X, y)
+    def __init__(self, base_estimators, alpha=4, n_dirichlet=2000,
+                 n_thresholds=100, cv=5, random_state=None,
+                 calibration="sigmoid", recall_floor=0.98,
+                 method="stacking"):
+        self.base_estimators = base_estimators
+        self.alpha = alpha
+        self.n_dirichlet = n_dirichlet
+        self.n_thresholds = n_thresholds
+        self.cv = cv
+        self.random_state = random_state
+        self.calibration = calibration
+        self.recall_floor = recall_floor
+        self.method = method  # "dirichlet" or "stacking"
+
+    def _recall(self, y_true, y_pred):
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        return 0.0 if (tp+fn)==0 else tp/(tp+fn)
+
+    def _gain(self, y_true, y_pred):
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        return -(fp + self.alpha * fn)
+
+    def _wrap_estimator(self, est):
+        # Set random state if possible
+        if hasattr(est, "random_state"):
+            est.random_state = self.random_state
+        if self.calibration is not None:
+            return CalibratedClassifierCV(clone(est), cv=3, method=self.calibration)
+        return clone(est)
+
+    def fit(self, X, y):
+        rng = np.random.RandomState(self.random_state)
+        cv = StratifiedKFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
+        oof_probs = [np.zeros(len(y)) for _ in self.base_estimators]
+
+        # Collect out-of-fold probabilities for all base estimators
+        for train_idx, valid_idx in cv.split(X, y):
+            X_train, X_valid = X[train_idx], X[valid_idx]
+            y_train = y[train_idx]
+            for i, est in enumerate(self.base_estimators):
+                model = self._wrap_estimator(est).fit(X_train, y_train)
+                probs = model.predict_proba(X_valid)[:, 1]
+                oof_probs[i][valid_idx] = probs
+
+        oof_probs = np.vstack(oof_probs).T  # (n_samples, n_estimators)
+
+        # --- Fusion by method ---
+        if self.method == "dirichlet":
+            best_gain, best_w, best_tau = -np.inf, None, None
+            taus = np.linspace(0, 1, self.n_thresholds)
+            for w in rng.dirichlet(np.ones(len(self.base_estimators)), size=self.n_dirichlet):
+                fused = np.dot(oof_probs, w)
+                for tau in taus:
+                    preds = (fused >= tau).astype(int)
+                    rec = self._recall(y, preds)
+                    if (self.recall_floor is not None) and (rec < self.recall_floor):
+                        continue  # reject this (w, τ) operating point
+                    g = self._gain(y, preds)
+                    if g > best_gain:
+                        best_gain, best_w, best_tau = g, w, tau
+            self.weights_ = best_w
+            self.threshold_ = best_tau
+
+        elif self.method == "stacking":
+            # Logistic regression on OOF probs as meta-model
+            meta = LogisticRegression(penalty=None, solver="lbfgs", max_iter=500,
+                                      random_state=self.random_state,
+                                      class_weight={0:1, 1:self.alpha})
+            meta.fit(oof_probs, y)
+            coefs = np.maximum(meta.coef_[0], 0)  # force non-negativity
+            if coefs.sum() == 0:
+                coefs = np.ones_like(coefs)
+            self.weights_ = coefs / coefs.sum()
+            # Tune threshold for cost-sensitive gain
+            best_gain, best_tau = -np.inf, 0.5
+            taus = np.linspace(0, 1, self.n_thresholds)
+            fused = np.dot(oof_probs, self.weights_)
+            for tau in taus:
+                preds = (fused >= tau).astype(int)
+                g = self._gain(y, preds)
+                if g > best_gain:
+                    best_gain, best_tau = g, tau
+            self.threshold_ = best_tau
+
+        else:
+            raise ValueError("method must be 'dirichlet' or 'stacking'")
+
+        # Refit base estimators on full training set
+        self.fitted_estimators_ = [self._wrap_estimator(est).fit(X, y) for est in self.base_estimators]
+        print(f"Chosen weights: {self.weights_}, threshold: {self.threshold_}")
         return self
 
-    def transform(self, X):
-        return self.worker_model.predict_proba(X)
+    def predict_proba(self, X):
+        probs = np.column_stack([est.predict_proba(X)[:, 1] for est in self.fitted_estimators_])
+        fused = np.dot(probs, self.weights_)
+        return np.column_stack([1 - fused, fused])
 
-def get_models(**kwargs):
-    default_kwargs = {"model_seed": 0}
-    kwargs = {**default_kwargs, **kwargs}
-    s = kwargs['model_seed']
-    
-    all_models = {
-        'tabular': {
-            'LogisticCV': LogisticRegressionCV(random_state=s, cv=5, n_jobs=-1, solver='newton-cg'),
-            'RandomForest': RandomForestClassifier(n_estimators=150, random_state=s),
-            'ExtraTrees': ExtraTreesClassifier(n_estimators=150, max_features=0.1,criterion="entropy", n_jobs=-1,random_state=s),
-        },
-        'ts': {
-            'Rocket': RocketClassifier(random_state=0, n_jobs=-1),
-            'Catch22': Catch22Classifier(random_state=0, n_jobs=-1),
-            'QUANT': QUANTClassifier(random_state=0)
-        }
-    }
+    def predict(self, X):
+        probs = self.predict_proba(X)[:, 1]
+        return (probs >= self.threshold_).astype(int)
 
-    default_kwargs = {'model_type': None, 'models_subset': None}
-    kwargs = {**default_kwargs, **kwargs}
-
-    collaposed_models = {**all_models['tabular'], **all_models['ts']}
-
-    if kwargs['model_type'] is None: # run all models
-        models = collaposed_models
-    else: # the saner choice :-)
-        models = all_models[kwargs['model_type']]
-    if kwargs['models_subset'] is not None: # select model subset
-        models = {**all_models['tabular'], **all_models['ts']}
-        models = {m: collaposed_models[m] for m in kwargs['models_subset']}
-    
-    return models
 
 def cost_fn(y_true=None, y_pred=None, cm=None, **kwargs):
     """
