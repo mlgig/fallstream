@@ -4,3 +4,5 @@ models
 .vscode
 .ipynb_checkpoints
 *.keras
+CLAUDE.md
+experiment.md
